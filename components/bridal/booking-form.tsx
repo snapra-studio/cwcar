@@ -34,6 +34,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { fmtDate, FRESH_FLOWER_COST, rs, todayIso, uid } from "@/lib/bridal/format"
 import {
   addBooking,
+  blocksOn,
   bookingMoney,
   carSlotsOn,
   describeGap,
@@ -117,7 +118,7 @@ function BookingFormInner({
   initialCarId,
   editing,
 }: FormProps & { editing?: Booking }) {
-  const { cars, bookings, drivers } = useBridal()
+  const { cars, bookings, drivers, blocks } = useBridal()
   const router = useRouter()
   const [saving, setSaving] = React.useState(false)
   const [date, setDate] = React.useState(editing?.date || initialDate || todayIso)
@@ -181,6 +182,8 @@ function BookingFormInner({
   // This car's other active hires on the chosen date (not counting the
   // booking being edited), as time slots.
   const daySlots = (carId: string) => carSlotsOn(bookings, carId, date, editing?.id)
+  // Times this car is marked unavailable (repair…) on the chosen date.
+  const dayBlocks = (carId: string) => blocksOn(blocks, carId, date)
   const slotText = (x: { start: number; end: number }) => `${fmtMinutes(x.start)} – ${fmtMinutes(x.end)}`
 
   // What's wrong with a car's times, if anything: drop-off not after pick-up,
@@ -190,6 +193,10 @@ function BookingFormInner({
     const end = toMinutes(route.dropTime)
     if (Number.isNaN(start) || Number.isNaN(end)) return ""
     if (end <= start) return "The drop-off time must be later than the pick-up time."
+    const out = dayBlocks(carId).filter((x) => start < x.end && end > x.start)
+    if (out.length) {
+      return `This car is marked unavailable then: ${out.map((x) => `${slotText(x)} (${x.block.reason})`).join(", ")}. Pick another time or car.`
+    }
     const hit = daySlots(carId).filter((x) => start < x.end && end > x.start)
     if (!hit.length) return ""
     return `Overlaps another hire of this car: ${hit.map((x) => `${slotText(x)} (${x.booking.invNo})`).join(", ")}.`
@@ -365,6 +372,7 @@ function BookingFormInner({
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3">
                     {allCars.map((c) => {
                       const slots = daySlots(c.id)
+                      const out = dayBlocks(c.id)
                       const on = picked.some((p) => p.carId === c.id)
                       return (
                         <FieldLabel
@@ -383,6 +391,18 @@ function BookingFormInner({
                                 <span>{c.color}</span>
                                 <span className="font-medium text-foreground">{rs(c.rate)}</span>
                               </FieldDescription>
+                              {out.length > 0 && (
+                                <div className="grid gap-0.5 text-xs">
+                                  <Badge variant="destructive" className="w-fit">
+                                    {freeGaps(out).length ? "Part unavailable" : "Unavailable this day"}
+                                  </Badge>
+                                  {out.map((x) => (
+                                    <span key={x.block.id} className="text-destructive">
+                                      {x.block.reason} {slotText(x)}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                               {slots.length > 0 && (
                                 <div className="grid gap-0.5 text-xs">
                                   <Badge variant="secondary" className="w-fit">
@@ -492,7 +512,7 @@ function BookingFormInner({
                           i > 0 ? () => setRoute(s.car.id, cloneRoute(selected[0].route)) : undefined
                         }
                         firstName={selected[0].car.name}
-                        booked={daySlots(s.car.id)}
+                        booked={[...daySlots(s.car.id), ...dayBlocks(s.car.id)].sort((a, b) => a.start - b.start)}
                         // Hidden while saving: the new hire lands in the data just before the form resets.
                         timeIssue={saving ? "" : timeIssue(s.car.id, s.route)}
                         drivers={drivers.filter((d) => d.status === "active" || d.id === s.driverId)}
@@ -763,7 +783,7 @@ function RouteEditor({
       )}
       {booked.length > 0 && (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
-          <span className="font-medium">This car is booked that day: </span>
+          <span className="font-medium">This car is booked or unavailable that day: </span>
           {booked.map((x) => `${fmtMinutes(x.start)} – ${fmtMinutes(x.end)}`).join(", ")}
           <span className="text-muted-foreground">
             {" "}

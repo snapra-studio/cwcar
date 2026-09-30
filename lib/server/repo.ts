@@ -7,13 +7,14 @@ import {
   bookingMoney,
   DEFAULT_SETTINGS,
   DEMO_CARS,
+  fmtBlockRange,
   fmtMinutes,
   toMinutes,
   upgradeBooking,
   upgradeSettings,
   type LegacyBooking,
 } from "@/lib/bridal/logic"
-import type { BookedCar, Booking, Car, Driver, DriverStatus, IndirectExpense, LedgerEntry, Settings } from "@/lib/bridal/types"
+import type { BookedCar, Booking, Car, CarBlock, Driver, DriverStatus, IndirectExpense, LedgerEntry, Settings } from "@/lib/bridal/types"
 import { isUniqueViolation, q, tx, type Db, type Row } from "@/lib/server/db"
 import { UserError } from "@/lib/server/errors"
 import { deleteFilesOf, deletePhotoUrl, listAllDocs, resolvePhoto } from "@/lib/server/files"
@@ -23,6 +24,7 @@ import type {
   carSchema,
   driverCreateSchema,
   driverUpdateSchema,
+  blockSchema,
   indirectAssignSchema,
   indirectSchema,
   ledgerSchema,
@@ -187,7 +189,7 @@ export async function setCoverImage(image: string | undefined) {
 // ---- Admin snapshot -----------------------------------------------------------
 
 export async function getAdminState() {
-  const [cars, bookings, ledger, kv, drivers, files, indirect] = await Promise.all([
+  const [cars, bookings, ledger, kv, drivers, files, indirect, blocks] = await Promise.all([
     q("SELECT * FROM cars ORDER BY name"),
     loadBookings(),
     q("SELECT * FROM ledger ORDER BY date, created_at"),
@@ -195,6 +197,7 @@ export async function getAdminState() {
     listDrivers(),
     listAllDocs(),
     listIndirect(),
+    listBlocks(),
   ])
   const settings = kv.find((r) => r.key === "settings")
   return {
@@ -206,6 +209,7 @@ export async function getAdminState() {
     drivers,
     files,
     indirect,
+    blocks,
   }
 }
 
@@ -284,6 +288,7 @@ export async function removeCar(id: string) {
   const [row] = await q("DELETE FROM cars WHERE id = $1 RETURNING image", [id])
   if (row?.image) await deletePhotoUrl(String(row.image))
   await deleteFilesOf("car_doc", [id])
+  await q("DELETE FROM car_blocks WHERE car_id = $1", [id])
 }
 
 // ---- Bookings -----------------------------------------------------------------
@@ -294,6 +299,8 @@ type BookingInput = z.infer<typeof bookingInputSchema>
 async function bookingChecks(db: Db, input: BookingInput, excludeId: string) {
   const carIds = input.cars.map((c) => c.carId)
   const driverIds = input.cars.flatMap((c) => (c.driverId ? [c.driverId] : []))
+  // Waits for any unavailable period being saved for these cars (see addBlock).
+  await lockCars(db, carIds)
   const { rows } = await db.query(
     `SELECT
        (SELECT COALESCE(json_agg(id), '[]') FROM cars WHERE id = ANY($1::text[])) AS cars,
@@ -305,6 +312,12 @@ async function bookingChecks(db: Db, input: BookingInput, excludeId: string) {
           JOIN jsonb_to_recordset($5::jsonb) AS r(car_id text, pickup_time text, drop_time text) ON r.car_id = bc.car_id
           WHERE bc.active AND bc.booking_id <> $4
             AND bc.slot && booking_slot($3::date, r.pickup_time, r.drop_time)) AS clash,
+       -- Periods these cars are marked unavailable (repair, service…).
+       (SELECT COALESCE(json_agg(json_build_object('car', cb.car_name, 'reason', cb.reason,
+                 'start', to_char(cb.start_at, 'YYYY-MM-DD"T"HH24:MI'), 'end', to_char(cb.end_at, 'YYYY-MM-DD"T"HH24:MI'))), '[]')
+          FROM car_blocks cb
+          JOIN jsonb_to_recordset($5::jsonb) AS r(car_id text, pickup_time text, drop_time text) ON r.car_id = cb.car_id
+          WHERE tsrange(cb.start_at, cb.end_at) && booking_slot($3::date, r.pickup_time, r.drop_time)) AS blocked,
        (SELECT count(*)::int FROM bookings WHERE date_part('year', date) = date_part('year', $3::date)) AS year_count`,
     [
       carIds,
@@ -319,6 +332,7 @@ async function bookingChecks(db: Db, input: BookingInput, excludeId: string) {
     existingCars: new Set(r.cars as string[]),
     drivers: new Map((r.drivers as { id: string; status: string }[]).map((d) => [d.id, d.status])),
     clash: r.clash as { car: string; from: string; to: string }[],
+    blocked: r.blocked as { car: string; reason: string; start: string; end: string }[],
     yearCount: Number(r.year_count),
   }
 }
@@ -344,6 +358,10 @@ function validate(input: BookingInput, checks: Awaited<ReturnType<typeof booking
     const at = (ts: string) => fmtMinutes(toMinutes(ts.slice(11, 16)))
     const list = checks.clash.map((c) => `${c.car} (${at(c.from)} – ${at(c.to)})`).join(", ")
     throw new UserError(`Already booked at that time: ${list}. Pick another time or car.`)
+  }
+  if (checks.blocked.length) {
+    const list = checks.blocked.map((b) => `${b.car} (${b.reason}, ${fmtBlockRange(b)})`).join("; ")
+    throw new UserError(`Marked unavailable at that time: ${list}. Pick another time or car.`)
   }
   const rate = input.cars.reduce((n, c) => n + c.rate, 0)
   const decoCost = input.deco === "fresh" ? FRESH_FLOWER_COST * input.cars.length : 0
@@ -678,17 +696,28 @@ export async function getPublicCars(): Promise<PublicCar[]> {
 
 // Booked time slots (car + start/end only) overlapping the days from..to
 // inclusive, for the public availability page. Nothing else about the hire.
-export type PublicSlot = { carId: string; start: string; end: string }
+// `blocked` marks a period the car is unavailable (repair…); the reason stays private.
+export type PublicSlot = { carId: string; start: string; end: string; blocked?: true }
 
 export async function getBookedSlots(from: string, to: string): Promise<PublicSlot[]> {
   const rows = await q(
     `SELECT car_id, to_char(lower(slot), 'YYYY-MM-DD"T"HH24:MI') AS start, to_char(upper(slot), 'YYYY-MM-DD"T"HH24:MI') AS "end"
+, false AS blocked
      FROM booking_cars
      WHERE active AND slot && tsrange($1::date, $2::date + 1)
-     ORDER BY lower(slot)`,
+     UNION ALL
+     SELECT car_id, to_char(start_at, 'YYYY-MM-DD"T"HH24:MI'), to_char(end_at, 'YYYY-MM-DD"T"HH24:MI'), true
+     FROM car_blocks
+     WHERE tsrange(start_at, end_at) && tsrange($1::date, $2::date + 1)
+     ORDER BY start`,
     [from, to]
   )
-  return rows.map((r) => ({ carId: String(r.car_id), start: String(r.start), end: String(r.end) }))
+  return rows.map((r) => ({
+    carId: String(r.car_id),
+    start: String(r.start),
+    end: String(r.end),
+    ...(r.blocked ? { blocked: true as const } : {}),
+  }))
 }
 
 // ---- First run ----------------------------------------------------------------
@@ -924,4 +953,74 @@ export async function assignIndirect(input: z.infer<typeof indirectAssignSchema>
 export async function removeIndirect(id: string) {
   await q("DELETE FROM indirect_expenses WHERE id = $1", [id])
   await deleteFilesOf("indirect", [id])
+}
+
+// ---- Car unavailable periods (repair, service…) ---------------------------------
+
+// Serialises saves touching the same cars: a booking and an unavailable period
+// for one car can't be saved at the same moment and both pass their checks.
+async function lockCars(db: Db, carIds: string[]) {
+  await db.query(
+    "SELECT pg_advisory_xact_lock(k) FROM (SELECT DISTINCT hashtext('car-slot:' || c) AS k FROM unnest($1::text[]) c ORDER BY 1) s",
+    [carIds]
+  )
+}
+
+const STAMP = `'YYYY-MM-DD"T"HH24:MI'`
+
+function toBlock(r: Row): CarBlock {
+  return {
+    id: String(r.id),
+    carId: String(r.car_id),
+    carName: String(r.car_name ?? ""),
+    start: String(r.start),
+    end: String(r.end),
+    reason: String(r.reason),
+    note: String(r.note ?? ""),
+    createdAt: String(r.created_at),
+  }
+}
+
+const BLOCK_COLUMNS = `id, car_id, car_name, to_char(start_at, ${STAMP}) AS start, to_char(end_at, ${STAMP}) AS "end", reason, note, created_at`
+
+export async function listBlocks() {
+  return (await q(`SELECT ${BLOCK_COLUMNS} FROM car_blocks ORDER BY start_at`)).map(toBlock)
+}
+
+// Refused if the car has a hire in that time: move the hire to another car
+// first, so no customer is left without a car.
+export async function addBlock(input: z.infer<typeof blockSchema>): Promise<CarBlock> {
+  try {
+    return await tx(async (db) => {
+      await lockCars(db, [input.carId])
+      const { rows: cars } = await db.query("SELECT name, color FROM cars WHERE id = $1", [input.carId])
+      if (!cars[0]) throw new UserError("That vehicle no longer exists.")
+      const { rows: hires } = await db.query(
+        `SELECT b.inv_no, b.customer, to_char(lower(bc.slot), ${STAMP}) AS start, to_char(upper(bc.slot), ${STAMP}) AS "end"
+         FROM booking_cars bc JOIN bookings b ON b.id = bc.booking_id
+         WHERE bc.active AND bc.car_id = $1 AND bc.slot && tsrange($2::timestamp, $3::timestamp)
+         ORDER BY lower(bc.slot)`,
+        [input.carId, input.start, input.end]
+      )
+      if (hires.length) {
+        const list = hires.map((h) => `${h.inv_no} ${h.customer} (${fmtBlockRange({ start: h.start, end: h.end })})`).join("; ")
+        throw new UserError(`This car has hires in that time: ${list}. Move them to another car first.`)
+      }
+      const { rows } = await db.query(
+        `INSERT INTO car_blocks (id, car_id, car_name, start_at, end_at, reason, note)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${BLOCK_COLUMNS}`,
+        [uid(), input.carId, `${cars[0].name} (${cars[0].color})`, input.start, input.end, input.reason, input.note]
+      )
+      return toBlock(rows[0])
+    })
+  } catch (err) {
+    if (typeof err === "object" && err && (err as { code?: string }).code === "23P01") {
+      throw new UserError("This car is already marked unavailable for part of that time.")
+    }
+    throw err
+  }
+}
+
+export async function removeBlock(id: string) {
+  await q("DELETE FROM car_blocks WHERE id = $1", [id])
 }

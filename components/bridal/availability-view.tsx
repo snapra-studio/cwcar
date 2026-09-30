@@ -2,9 +2,12 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
+import { ChevronLeftIcon, ChevronRightIcon, WrenchIcon } from "lucide-react"
+import { toast } from "sonner"
 
+import { BlockDialog } from "@/components/bridal/block-dialog"
 import { CarPhoto, Swatch } from "@/components/bridal/car-art"
+import { ConfirmAction } from "@/components/bridal/confirm-action"
 import { InvoiceDialog } from "@/components/bridal/invoice-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -45,7 +48,18 @@ import {
   rs,
   todayIso,
 } from "@/lib/bridal/format"
-import { carSlotsOn, describeGap, fmtMinutes, freeGaps, isActive, sortCars, useBridal } from "@/lib/bridal/store"
+import {
+  blocksOn,
+  carSlotsOn,
+  describeGap,
+  fmtBlockRange,
+  fmtMinutes,
+  freeGaps,
+  isActive,
+  removeBlock,
+  sortCars,
+  useBridal,
+} from "@/lib/bridal/store"
 import type { Booking } from "@/lib/bridal/types"
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -67,7 +81,7 @@ export function AvailabilityView() {
 }
 
 function Availability() {
-  const { cars, bookings } = useBridal()
+  const { cars, bookings, blocks } = useBridal()
   const [selDate, setSelDate] = React.useState(todayIso)
   const [view, setView] = React.useState(() => {
     const d = parseIso(selDate)
@@ -103,9 +117,11 @@ function Availability() {
   // several hires a day as long as their times don't overlap.
   const dayRows = sorted.map((car) => {
     const slots = carSlotsOn(bookings, car.id, selDate)
-    return { car, slots, gaps: freeGaps(slots) }
+    // Periods the car is out of service (repair…) that day.
+    const blocked = blocksOn(blocks, car.id, selDate)
+    return { car, slots, blocked, gaps: freeGaps([...slots, ...blocked]) }
   })
-  const free = dayRows.filter((r) => !r.slots.length).length
+  const free = dayRows.filter((r) => !r.slots.length && !r.blocked.length).length
 
   return (
     <div className="grid gap-6">
@@ -143,6 +159,7 @@ function Availability() {
               </NativeSelectOption>
             ))}
           </NativeSelect>
+          <BlockDialog carId={carFilter === "all" ? undefined : carFilter} date={selDate} />
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-7 gap-1.5 pb-1 text-center text-[11px] tracking-widest text-muted-foreground uppercase">
@@ -161,6 +178,10 @@ function Availability() {
               // Hires of the filtered car that day (it may still have free time).
               const carHires = carFilter === "all" ? 0 : carSlotsOn(bookings, carFilter, s).length
               const dayCarIds = dayBookings.flatMap((b) => b.cars.map((c) => c.carId))
+              // Cars out of service (repair…) for some or all of the day.
+              const outIds = cars.filter((c) => blocksOn(blocks, c.id, s).length).map((c) => c.id)
+              const carOut = carFilter === "all" ? [] : blocksOn(blocks, carFilter, s)
+              const carOutAllDay = carOut.length > 0 && freeGaps(carOut).length === 0
               return (
                 <button
                   key={s}
@@ -171,7 +192,12 @@ function Availability() {
                   className={cn(
                     "relative flex aspect-[1/0.92] min-w-0 flex-col justify-between rounded-lg border bg-card p-1 text-left transition-colors outline-none hover:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:p-1.5",
                     s < today && "opacity-45",
-                    carFilter !== "all" && (carHires ? "border-amber-500/40 bg-amber-500/10" : "bg-muted"),
+                    carFilter !== "all" &&
+                      (carOut.length
+                        ? "border-rose-500/40 bg-rose-500/10"
+                        : carHires
+                          ? "border-amber-500/40 bg-amber-500/10"
+                          : "bg-muted"),
                     s === selDate && "border-2 border-primary"
                   )}
                 >
@@ -183,7 +209,16 @@ function Availability() {
                   >
                     {d}
                   </span>
-                  {s === tomorrow && dayBookings.length > 0 && (
+                  {outIds.length > 0 && (carFilter === "all" || carOut.length > 0) && (
+                    <span
+                      className="absolute top-1 right-1 flex items-center gap-0.5 rounded bg-rose-600 px-1 text-[10px] leading-4 font-semibold text-white"
+                      title={`${carFilter === "all" ? outIds.length : 1} car${outIds.length === 1 || carFilter !== "all" ? "" : "s"} unavailable`}
+                    >
+                      <WrenchIcon className="size-2.5" />
+                      {carFilter === "all" && outIds.length > 1 ? outIds.length : ""}
+                    </span>
+                  )}
+                  {s === tomorrow && dayBookings.length > 0 && outIds.length === 0 && (
                     <span className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-primary" />
                   )}
                   {carFilter === "all" ? (
@@ -195,13 +230,19 @@ function Availability() {
                       </span>
                       {cars.length > 0 && (
                         <span className="hidden text-[11px] text-muted-foreground sm:block">
-                          {cars.length - new Set(dayCarIds).size}/{cars.length} no hires
+                          {cars.length - new Set([...dayCarIds, ...outIds]).size}/{cars.length} free
                         </span>
                       )}
                     </>
                   ) : (
                     <span className="hidden text-[11px] text-muted-foreground sm:block">
-                      {carHires ? `${carHires} hire${carHires === 1 ? "" : "s"}` : "Free"}
+                      {carOutAllDay
+                        ? "Unavailable"
+                        : carOut.length
+                          ? `Part unavailable${carHires ? ` · ${carHires} hire${carHires === 1 ? "" : "s"}` : ""}`
+                          : carHires
+                            ? `${carHires} hire${carHires === 1 ? "" : "s"}`
+                            : "Free"}
                     </span>
                   )}
                 </button>
@@ -215,6 +256,12 @@ function Availability() {
                   <span className="size-2 rounded-full bg-primary" /> Hire tomorrow
                 </span>
                 <span>Dots = hires (a car can have several a day)</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="flex size-3 items-center justify-center rounded bg-rose-600 text-white">
+                    <WrenchIcon className="size-2" />
+                  </span>
+                  Car unavailable (repair…)
+                </span>
               </>
             ) : (
               <>
@@ -223,6 +270,9 @@ function Availability() {
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="size-2.5 rounded-sm border border-amber-500/40 bg-amber-500/10" /> Has hires (check times)
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2.5 rounded-sm border border-rose-500/40 bg-rose-500/10" /> Unavailable (repair…)
                 </span>
               </>
             )}
@@ -239,7 +289,7 @@ function Availability() {
           {cars.length > 0 && (
             <CardAction>
               <Badge variant="secondary">
-                {free} of {cars.length} with no hires
+                {free} of {cars.length} fully free
               </Badge>
             </CardAction>
           )}
@@ -259,7 +309,7 @@ function Availability() {
             </Empty>
           ) : (
             <ItemGroup className="gap-2">
-              {dayRows.map(({ car, slots, gaps }) => (
+              {dayRows.map(({ car, slots, blocked, gaps }) => (
                 <Item key={car.id} variant="outline" size="sm" className="items-start">
                   <ItemMedia className="w-28 overflow-hidden rounded-lg">
                     <CarPhoto car={car} sizes="112px" />
@@ -290,14 +340,70 @@ function Availability() {
                         ))}
                       </ul>
                     )}
-                    {slots.length > 0 && (
+                    {blocked.length > 0 && (
+                      <ul className="mt-1 grid gap-1">
+                        {blocked.map((x) => (
+                          <li
+                            key={x.block.id}
+                            className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-sm"
+                          >
+                            <WrenchIcon className="size-3.5 text-rose-700" />
+                            <span className="font-mono font-medium tabular-nums">
+                              {x.start === 0 && x.end >= 24 * 60 ? "All day" : `${fmtMinutes(x.start)} – ${fmtMinutes(x.end)}`}
+                            </span>
+                            <span className="font-medium text-rose-800 dark:text-rose-300">Unavailable · {x.block.reason}</span>
+                            {x.block.note && <span className="text-muted-foreground">{x.block.note}</span>}
+                            <span className="w-full text-xs text-muted-foreground">{fmtBlockRange(x.block)}</span>
+                            <ConfirmAction
+                              trigger={
+                                <Button size="xs" variant="outline">
+                                  Make available
+                                </Button>
+                              }
+                              title={`Make ${car.name} available again?`}
+                              description={`Removes the whole period: ${fmtBlockRange(x.block)} (${x.block.reason}).`}
+                              confirmLabel="Make available"
+                              onConfirm={async () => {
+                                try {
+                                  await removeBlock(x.block.id)
+                                  toast.success(`${car.name} is available again`)
+                                } catch (err) {
+                                  toast.error(err instanceof Error ? err.message : "Could not update. Try again.")
+                                }
+                              }}
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {(slots.length > 0 || blocked.length > 0) && (
                       <ItemDescription>Free: {gaps.map(describeGap).join(", ") || "none"}</ItemDescription>
                     )}
                   </ItemContent>
                   <ItemActions className="ml-auto self-center">
-                    <Badge variant={slots.length ? "outline" : "secondary"}>
-                      {slots.length ? `${slots.length} hire${slots.length === 1 ? "" : "s"}` : "Free all day"}
+                    <Badge
+                      variant={slots.length || blocked.length ? "outline" : "secondary"}
+                      className={cn(blocked.length > 0 && !gaps.length && "border-rose-500/40 text-rose-700")}
+                    >
+                      {blocked.length > 0 && !gaps.length
+                        ? "Unavailable"
+                        : slots.length
+                          ? `${slots.length} hire${slots.length === 1 ? "" : "s"}`
+                          : blocked.length
+                            ? "Part unavailable"
+                            : "Free all day"}
                     </Badge>
+                    {!past && gaps.length > 0 && (
+                      <BlockDialog
+                        carId={car.id}
+                        date={selDate}
+                        trigger={
+                          <Button size="icon-sm" variant="ghost" aria-label={`Mark ${car.name} unavailable`} title="Mark unavailable">
+                            <WrenchIcon />
+                          </Button>
+                        }
+                      />
+                    )}
                     {!past && gaps.length > 0 && (
                       <Button size="sm" asChild>
                         <Link href={`/dashboard/bookings/new?date=${selDate}&car=${encodeURIComponent(car.id)}`}>Book</Link>

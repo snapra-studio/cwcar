@@ -104,6 +104,22 @@ export const INDIRECT_CATEGORIES = [
   "Other",
 ]
 
+// A period a car can't be hired (repair, service…). start/end are local
+// "YYYY-MM-DDTHH:MM"; end is exclusive, so a whole day ends at next 00:00.
+// Customers only see "not available due to an unavoidable reason".
+export type CarBlock = {
+  id: string
+  carId: string
+  carName: string
+  start: string
+  end: string
+  reason: string
+  note: string
+  createdAt: string
+}
+
+export const BLOCK_REASONS = ["Repair", "Service / maintenance", "Accident", "Owner needs the car", "Other"]
+
 export const EXPENSE_CATEGORIES = ["Petrol", "Driver", "Toll & parking", "Decoration", "Repairs", "Other"]
 export const INCOME_CATEGORIES = ["Extra hours", "Extra kilometres", "Waiting charge", "Decoration", "Other"]
 

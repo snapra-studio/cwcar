@@ -39,7 +39,8 @@ const serif = Playfair_Display({ subsets: ["latin"], weight: ["400", "500", "600
 type PublicCar = { id: string; name: string; color: string; hex: string; style: CarStyle; image?: string }
 type Business = { name: string; phone: string; email: string; address: string }
 // Booked time slots only ("YYYY-MM-DDTHH:MM"), no other hire details.
-type PublicSlot = { carId: string; start: string; end: string }
+// `blocked`: the car is out of service then (the reason isn't shared).
+type PublicSlot = { carId: string; start: string; end: string; blocked?: true }
 type Data = { business: Business; cars: PublicCar[]; slots: PublicSlot[] }
 type DayState = "free" | "partial" | "booked"
 
@@ -105,6 +106,7 @@ export function AvailabilityChecker({ today }: { today: string }) {
       .map((x) => ({
         start: x.start.slice(0, 10) < day ? 0 : toMinutes(x.start.slice(11, 16)),
         end: x.end.slice(0, 10) > day ? 24 * 60 : toMinutes(x.end.slice(11, 16)),
+        blocked: !!x.blocked,
       }))
       .filter((x) => x.end > x.start)
       .sort((a, b) => a.start - b.start)
@@ -122,6 +124,17 @@ export function AvailabilityChecker({ today }: { today: string }) {
     return freeGaps(slots).length ? "partial" : "booked"
   }
   const slotText = (x: { start: number; end: number }) => `${fmtMinutes(x.start)} – ${fmtMinutes(x.end)}`
+  const UNAVOIDABLE = "not available due to an unavoidable reason"
+  // Booked times and out-of-service times, described separately.
+  const describeSlots = (list: { start: number; end: number; blocked: boolean }[]) =>
+    [
+      list.some((x) => !x.blocked) && `Booked ${list.filter((x) => !x.blocked).map(slotText).join(", ")}`,
+      list.some((x) => x.blocked) && `${list.filter((x) => x.blocked).map(slotText).join(", ")} ${UNAVOIDABLE}`,
+    ]
+      .filter(Boolean)
+      .join(" · ")
+  const allDayOut = (list: { start: number; end: number; blocked: boolean }[]) =>
+    list.some((x) => x.blocked) && freeGaps(list.filter((x) => x.blocked)).length === 0
   const q = query.trim().toLowerCase()
   const colourOf = (c: PublicCar) => c.color.trim().toLowerCase()
   const shown = cars.filter(
@@ -297,11 +310,7 @@ export function AvailabilityChecker({ today }: { today: string }) {
                     ✕ {selected.name} — not available {windowText}
                   </p>
                   <p className="text-sm text-[#7A6149]">
-                    Booked{" "}
-                    {selSlots
-                      .filter((x) => overlaps(winStart, winEnd, x.start, x.end))
-                      .map(slotText)
-                      .join(", ")}
+                    {describeSlots(selSlots.filter((x) => overlaps(winStart, winEnd, x.start, x.end)))}
                   </p>
                 </>
               ) : (
@@ -313,15 +322,31 @@ export function AvailabilityChecker({ today }: { today: string }) {
               selSlots.length === 0 ? (
                 <p className="text-lg font-bold text-emerald-700 sm:text-xl">✓ Free all day</p>
               ) : (
+                allDayOut(selSlots) ? (
+                <p className="text-lg font-bold text-destructive sm:text-xl">
+                  ✕ {selected.name} is {UNAVOIDABLE} on this day
+                </p>
+                ) : (
                 <>
-                  <p className="text-base font-semibold sm:text-lg">
-                    <span className="text-destructive">Booked:</span> {selSlots.map(slotText).join(", ")}
-                  </p>
+                  {selSlots.some((x) => !x.blocked) && (
+                    <p className="text-base font-semibold sm:text-lg">
+                      <span className="text-destructive">Booked:</span>{" "}
+                      {selSlots.filter((x) => !x.blocked).map(slotText).join(", ")}
+                    </p>
+                  )}
+                  {selSlots.some((x) => x.blocked) && (
+                    <p className="text-base font-semibold sm:text-lg">
+                      <span className="text-destructive">Not available</span>{" "}
+                      {selSlots.filter((x) => x.blocked).map(slotText).join(", ")}{" "}
+                      <span className="font-normal text-[#7A6149]">(due to an unavoidable reason)</span>
+                    </p>
+                  )}
                   <p className="text-base font-semibold sm:text-lg">
                     <span className="text-emerald-700">Available:</span>{" "}
                     {freeGaps(selSlots).map(describeGap).join(", ") || "no free time this day"}
                   </p>
                 </>
+                )
               )
             ) : (
               <p className="text-lg font-semibold sm:text-xl">
@@ -462,7 +487,7 @@ export function AvailabilityChecker({ today }: { today: string }) {
                 <span className="size-3 rounded bg-amber-400" /> Partly booked
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <span className="size-3 rounded bg-rose-400" /> Booked
+                <span className="size-3 rounded bg-rose-400" /> Booked / not available
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <span className="size-3 rounded bg-[#EDE3D6]" />
@@ -545,7 +570,9 @@ export function AvailabilityChecker({ today }: { today: string }) {
                                 state === "booked" ? "bg-rose-600" : state === "partial" ? "bg-amber-600" : "bg-emerald-600"
                               )}
                             >
-                              {state === "booked"
+                              {state === "booked" && (windowOk ? carSlots.some((x) => x.blocked && overlaps(winStart, winEnd, x.start, x.end)) : allDayOut(carSlots))
+                                ? "Not available"
+                                : state === "booked"
                                 ? windowOk
                                   ? "Booked"
                                   : "Fully booked"
@@ -564,7 +591,7 @@ export function AvailabilityChecker({ today }: { today: string }) {
                               {c.color} · {STYLE_LABEL[c.style]}
                             </div>
                             {carSlots.length > 0 && !windowOk && (
-                              <div className="text-xs text-[#9C8670]">Booked {carSlots.map(slotText).join(", ")}</div>
+                              <div className="text-xs text-[#9C8670]">{describeSlots(carSlots)}</div>
                             )}
                           </div>
                           <span

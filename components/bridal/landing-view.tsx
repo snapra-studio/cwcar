@@ -12,7 +12,7 @@ import { InvoiceDialog } from "@/components/bridal/invoice-dialog"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { addDays, fmtDate, fmtTime, rs, todayIso } from "@/lib/bridal/format"
-import { carNames, carSlotsOn, isActive, setCoverImage, sortCars, startTime, useBridal } from "@/lib/bridal/store"
+import { blocksOn, carNames, carSlotsOn, isActive, setCoverImage, sortCars, startTime, useBridal } from "@/lib/bridal/store"
 import type { Booking } from "@/lib/bridal/types"
 import { cn } from "@/lib/utils"
 
@@ -36,7 +36,7 @@ async function saveCover(image: string | undefined) {
 }
 
 function Landing() {
-  const { cars, bookings, settings } = useBridal()
+  const { cars, bookings, blocks, settings } = useBridal()
   const [invoice, setInvoice] = React.useState<Booking | null>(null)
   const today = todayIso()
   const month = today.slice(0, 7)
@@ -53,7 +53,7 @@ function Landing() {
     .sort((a, b) => (a.date + startTime(a)).localeCompare(b.date + startTime(b)))
 
   const stats = [
-    { label: "Free today", value: `${cars.filter((c) => !carSlotsOn(bookings, c.id, today).length).length}/${cars.length}` },
+    { label: "Free today", value: `${cars.filter((c) => !carSlotsOn(bookings, c.id, today).length && !blocksOn(blocks, c.id, today).length).length}/${cars.length}` },
     { label: "Hires this month", value: monthBookings.length },
     { label: "Upcoming", value: upcoming.length },
     { label: "Booked this month", value: rs(monthBookings.reduce((sum, b) => sum + b.total, 0)) },

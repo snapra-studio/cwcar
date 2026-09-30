@@ -1,8 +1,8 @@
 // Pure booking rules shared by the browser (admin screens) and the server
 // (database, driver pages, public availability). No React, no storage.
 
-import { addDays, fmtTime } from "@/lib/bridal/format"
-import type { BookedCar, Booking, Car, LedgerEntry, Route, Settings } from "@/lib/bridal/types"
+import { addDays, fmtDate, fmtTime } from "@/lib/bridal/format"
+import type { BookedCar, Booking, Car, CarBlock, LedgerEntry, Route, Settings } from "@/lib/bridal/types"
 
 export const DEFAULT_SETTINGS: Settings = {
   bizName: "Crish Wedding Cars & Rentals",
@@ -75,6 +75,36 @@ export function carSlotsOn(bookings: Booking[], carId: string, date: string, exc
 // Existing slots that clash with a new start-end (minutes) on that date.
 export const clashes = (bookings: Booking[], carId: string, date: string, start: number, end: number, excludeId?: string) =>
   carSlotsOn(bookings, carId, date, excludeId).filter((s) => overlaps(start, end, s.start, s.end))
+
+// Periods `carId` is marked unavailable (repair…) on `date`, clipped to
+// that day, in minutes.
+export type BlockedSlot = { start: number; end: number; block: CarBlock }
+export function blocksOn(blocks: CarBlock[], carId: string, date: string): BlockedSlot[] {
+  const out: BlockedSlot[] = []
+  for (const b of blocks) {
+    const from = b.start.slice(0, 10)
+    const to = b.end.slice(0, 10)
+    if (b.carId !== carId || date < from || date > to) continue
+    const start = date === from ? toMinutes(b.start.slice(11, 16)) : 0
+    const end = date === to ? toMinutes(b.end.slice(11, 16)) : DAY
+    if (end > start) out.push({ start, end, block: b })
+  }
+  return out.sort((a, b) => a.start - b.start)
+}
+
+// "Mon, 5 Oct 2026, 8:00 AM – 5:00 PM", "Mon, 5 Oct 2026 – Wed, 7 Oct 2026 (all day)"…
+// start/end are "YYYY-MM-DDTHH:MM", end exclusive.
+export function fmtBlockRange(b: { start: string; end: string }) {
+  const [sd, st] = [b.start.slice(0, 10), b.start.slice(11, 16)]
+  const [ed, et] = [b.end.slice(0, 10), b.end.slice(11, 16)]
+  if (st === "00:00" && et === "00:00") {
+    const last = addDays(ed, -1)
+    return last === sd ? `${fmtDate(sd)} (all day)` : `${fmtDate(sd)} – ${fmtDate(last)} (all day)`
+  }
+  const endTime = et === "00:00" ? "midnight" : fmtTime(et)
+  if (sd === ed || (et === "00:00" && addDays(ed, -1) === sd)) return `${fmtDate(sd)}, ${fmtTime(st)} – ${endTime}`
+  return `${fmtDate(sd)} ${fmtTime(st)} – ${fmtDate(ed)} ${endTime}`
+}
 
 // Free periods between booked slots on one day, as [start, end) minutes.
 export function freeGaps(slots: { start: number; end: number }[]) {

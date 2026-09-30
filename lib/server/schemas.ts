@@ -108,6 +108,23 @@ export const indirectSchema = z.object({
   amount: money.refine((n) => n > 0, "Add an amount"),
 })
 
+// "YYYY-MM-DDTHH:MM" local time.
+const stamp = z.string().regex(/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/, "Use a date and time")
+
+export const blockSchema = z
+  .object({
+    carId: id,
+    start: stamp,
+    end: stamp,
+    reason: required(60, "a reason"),
+    note: text(300),
+  })
+  .refine((b) => b.end > b.start, { message: "The end must be after the start.", path: ["end"] })
+  .refine((b) => Date.parse(b.end.slice(0, 10)) - Date.parse(b.start.slice(0, 10)) <= 366 * 86_400_000, {
+    message: "Mark at most a year at a time.",
+    path: ["end"],
+  })
+
 // Assigns an indirect expense to a vehicle, or (null) to none.
 export const indirectAssignSchema = z.object({ id, carId: id.nullable() })
 

@@ -6,6 +6,7 @@ import { deleteFile, getFile } from "@/lib/server/files"
 import { Forbidden, requireAdmin } from "@/lib/server/guard"
 import * as repo from "@/lib/server/repo"
 import {
+  blockSchema,
   bookingInputSchema,
   carSchema,
   driverCreateSchema,
@@ -116,4 +117,12 @@ export async function assignIndirectAction(input: unknown) {
 }
 export async function removeIndirectAction(entryId: unknown) {
   return run(() => repo.removeIndirect(id.parse(entryId)))
+}
+
+// ---- Car unavailable periods ----
+export async function addBlockAction(input: unknown) {
+  return run(() => repo.addBlock(blockSchema.parse(input)))
+}
+export async function removeBlockAction(blockId: unknown) {
+  return run(() => repo.removeBlock(id.parse(blockId)))
 }

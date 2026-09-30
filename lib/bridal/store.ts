@@ -7,6 +7,7 @@ import type {
   Booking,
   BookingInput,
   Car,
+  CarBlock,
   DocOwner,
   Driver,
   FileMeta,
@@ -22,8 +23,10 @@ import * as api from "@/lib/server/admin-actions"
 // before the copy is updated.
 
 export {
+  blocksOn,
   bookingMoney,
   carSlotsOn,
+  fmtBlockRange,
   clashes,
   describeGap,
   fmtMinutes,
@@ -54,6 +57,7 @@ export type BridalState = {
   files: FileMeta[]
   // Business costs not tied to a hire.
   indirect: IndirectExpense[]
+  blocks: CarBlock[]
 }
 
 const EMPTY: BridalState = {
@@ -65,6 +69,7 @@ const EMPTY: BridalState = {
   drivers: [],
   files: [],
   indirect: [],
+  blocks: [],
 }
 
 let state: BridalState = EMPTY
@@ -119,6 +124,7 @@ async function load() {
     drivers: data.drivers,
     files: data.files ?? [],
     indirect: data.indirect ?? [],
+    blocks: data.blocks ?? [],
   })
 }
 
@@ -311,4 +317,17 @@ export async function removeIndirect(id: string) {
     indirect: s.indirect.filter((e) => e.id !== id),
     files: s.files.filter((f) => !(f.ownerType === "indirect" && f.ownerId === id)),
   }))
+}
+
+// ---- Car unavailable periods (repair, service…) ----
+
+export async function addBlock(input: { carId: string; start: string; end: string; reason: string; note: string }) {
+  const b = await call(api.addBlockAction(input))
+  patch((s) => ({ blocks: [...s.blocks, b].sort((x, y) => x.start.localeCompare(y.start)) }))
+  return b
+}
+
+export async function removeBlock(id: string) {
+  await call(api.removeBlockAction(id))
+  patch((s) => ({ blocks: s.blocks.filter((b) => b.id !== id) }))
 }
