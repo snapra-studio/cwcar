@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { CarPhoto } from "@/components/bridal/car-art"
 import { ConfirmAction } from "@/components/bridal/confirm-action"
+import { FilesDialog } from "@/components/bridal/files-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -108,6 +109,12 @@ export function BookingRow({
             </Link>
           </Button>
         )}
+        <FilesDialog
+          ownerType="booking"
+          ownerId={b.id}
+          title={`Files · ${b.invNo}`}
+          description="Agreement, customer ID copy, payment slips. Drivers assigned to this hire can view them."
+        />
         {b.status !== "cancelled" && (
           <ConfirmAction
             trigger={

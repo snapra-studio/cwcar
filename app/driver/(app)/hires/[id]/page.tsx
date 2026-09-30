@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
-import { ArrowLeftIcon, FileTextIcon, FlowerIcon, PhoneIcon, UserRoundIcon } from "lucide-react"
+import { ArrowLeftIcon, ExternalLinkIcon, FileTextIcon, FlowerIcon, PaperclipIcon, PhoneIcon, UserRoundIcon } from "lucide-react"
 
 import { CarPhoto } from "@/components/bridal/car-art"
 import { RouteList, StatusBadge } from "@/components/driver/hire-card"
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { fmtDate } from "@/lib/bridal/format"
 import { hireStatus } from "@/lib/bridal/logic"
 import { driverPage } from "@/lib/server/guard"
+import { listFiles } from "@/lib/server/files"
 import { getCarInfo, getDriverHire } from "@/lib/server/repo"
 import { todayInBusinessTz } from "@/lib/server/today"
 
@@ -20,7 +21,8 @@ export default async function DriverHirePage({ params }: PageProps<"/driver/hire
   if (!hire) notFound()
 
   const status = hireStatus(hire, todayInBusinessTz())
-  const cars = await getCarInfo(hire.myCars.map((c) => c.carId))
+  // Only this hire's files; the file route re-checks the assignment on open.
+  const [cars, files] = await Promise.all([getCarInfo(hire.myCars.map((c) => c.carId)), listFiles("booking", hire.id)])
   const others = hire.cars.length - hire.myCars.length
 
   return (
@@ -87,6 +89,34 @@ export default async function DriverHirePage({ params }: PageProps<"/driver/hire
         <p className="text-sm text-muted-foreground">
           {others} other car{others === 1 ? " is" : "s are"} on this hire with another driver.
         </p>
+      )}
+
+      {files.length > 0 && (
+        <section className="grid gap-2 rounded-2xl border bg-card p-4" aria-labelledby="hire-files">
+          <h2 id="hire-files" className="flex items-center gap-1.5 text-xs font-bold tracking-widest text-muted-foreground uppercase">
+            <PaperclipIcon className="size-3.5" />
+            Hire files
+          </h2>
+          <ul className="grid gap-1.5">
+            {files.map((f) => (
+              <li key={f.id}>
+                <a
+                  href={f.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-3 rounded-xl border bg-background/60 p-3 transition-colors hover:border-primary/50"
+                >
+                  <FileTextIcon className="size-5 shrink-0 text-primary" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium">{f.docType}</span>
+                    <span className="block truncate text-sm text-muted-foreground">{f.fileName}</span>
+                  </span>
+                  <ExternalLinkIcon className="size-4 shrink-0 text-muted-foreground" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {status !== "cancelled" && (

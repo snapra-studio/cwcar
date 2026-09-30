@@ -1,9 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { KeyRoundIcon, PencilIcon, PlusIcon, UserRoundIcon } from "lucide-react"
+import { FileTextIcon, KeyRoundIcon, PencilIcon, PlusIcon, UserRoundIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { ExpiryWarning, FilesDialog } from "@/components/bridal/files-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -25,7 +26,7 @@ import { createDriver, isActive, setDriverPassword, updateDriver, useBridal } fr
 import type { Driver, DriverStatus } from "@/lib/bridal/types"
 
 export function DriversView() {
-  const { ready, drivers, bookings } = useBridal()
+  const { ready, drivers, bookings, files } = useBridal()
   if (!ready) return <Skeleton className="h-72 rounded-xl" />
 
   const today = todayIso()
@@ -66,6 +67,7 @@ export function DriversView() {
           <ul className="grid gap-2">
             {drivers.map((d) => {
               const dates = upcoming(d.id)
+              const docs = files.filter((f) => f.ownerType === "driver_doc" && f.ownerId === d.id)
               return (
                 <li key={d.id} className="flex flex-wrap items-center gap-3 rounded-xl border bg-background/60 p-3">
                   <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/15 font-semibold text-primary">
@@ -77,6 +79,7 @@ export function DriversView() {
                       <Badge variant={d.status === "active" ? "secondary" : "destructive"}>
                         {d.status === "active" ? "Active" : "Switched off"}
                       </Badge>
+                      <ExpiryWarning files={docs} />
                     </div>
                     <div className="text-sm text-muted-foreground">
                       {d.email}
@@ -91,6 +94,18 @@ export function DriversView() {
                   <div className="flex gap-2">
                     <DriverDialog mode="edit" driver={d} />
                     <PasswordDialog driver={d} />
+                    <FilesDialog
+                      ownerType="driver_doc"
+                      ownerId={d.id}
+                      title={`Documents · ${d.name}`}
+                      description="Driving licence, NIC copy. Only the admin can see these."
+                      trigger={
+                        <Button size="sm" variant="outline" className="rounded-full">
+                          <FileTextIcon data-icon="inline-start" />
+                          Documents{docs.length ? ` (${docs.length})` : ""}
+                        </Button>
+                      }
+                    />
                   </div>
                 </li>
               )

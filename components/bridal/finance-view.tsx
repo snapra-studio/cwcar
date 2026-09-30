@@ -1,10 +1,11 @@
 "use client"
 
 import * as React from "react"
-import { ChevronDownIcon, MinusCircleIcon, PlusCircleIcon, SearchIcon, Trash2Icon } from "lucide-react"
+import { ChevronDownIcon, MinusCircleIcon, PaperclipIcon, PlusCircleIcon, SearchIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { ConfirmAction } from "@/components/bridal/confirm-action"
+import { FilesDialog } from "@/components/bridal/files-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -299,6 +300,8 @@ function HireRows({
 
 function EntryItem({ entry: e }: { entry: LedgerEntry }) {
   const income = e.kind === "income"
+  const { files } = useBridal()
+  const receipts = files.filter((f) => f.ownerType === "ledger" && f.ownerId === e.id).length
   return (
     <li className="flex flex-wrap items-center gap-2 text-sm">
       <Badge variant={income ? "secondary" : "outline"}>{income ? "Income" : "Expense"}</Badge>
@@ -308,6 +311,23 @@ function EntryItem({ entry: e }: { entry: LedgerEntry }) {
       <span className="ml-auto font-medium tabular-nums">
         {income ? "+" : "−"} {rs(e.amount)}
       </span>
+      <FilesDialog
+        ownerType="ledger"
+        ownerId={e.id}
+        title={`Receipt · ${e.category} ${rs(e.amount)}`}
+        description="Attach a photo or PDF of the receipt."
+        trigger={
+          <Button
+            size="sm"
+            variant="ghost"
+            className={cn("h-7 gap-1 px-2", receipts ? "text-primary" : "text-muted-foreground")}
+            aria-label={receipts ? `${receipts} receipt(s)` : "Attach receipt"}
+          >
+            <PaperclipIcon className="size-4" />
+            {receipts ? receipts : ""}
+          </Button>
+        }
+      />
       <ConfirmAction
         trigger={
           <Button size="icon-sm" variant="ghost" aria-label={`Remove ${e.category}`}>

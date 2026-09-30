@@ -12,7 +12,8 @@ export type Car = {
   style: CarStyle
   plate: string
   rate: number
-  // Photo as a data URL (uploaded) or any image URL. Falls back to CarArt.
+  // Photo URL (/api/files/<id>, stored in file storage). Falls back to CarArt.
+  // A data URL is accepted when saving; the server moves it into storage.
   image?: string
   fleet?: Fleet
   ownerName?: string
@@ -119,6 +120,43 @@ export type Settings = {
   bankBranch: string
   accountNo: string
   accountName: string
-  // Landing page photo (data URL). Falls back to a fleet photo.
+  // Landing page photo URL (/api/files/<id>). Falls back to a fleet photo.
   coverImage?: string
 }
+
+// ---- Uploaded files (stored in S3-compatible storage) ----------------------
+
+// What a document is attached to. Car photos and the landing photo are
+// handled separately (they're public and replace each other).
+export type DocOwner = "booking" | "ledger" | "car_doc" | "driver_doc"
+
+export type FileMeta = {
+  id: string
+  ownerType: DocOwner | "car_image" | "cover"
+  ownerId: string
+  docType: string
+  expiresOn?: string
+  fileName: string
+  contentType: string
+  size: number
+  uploadedAt: string
+  // Where the browser fetches it (permission-checked): /api/files/<id>
+  url: string
+}
+
+// Document kinds offered for each owner. Those with `expires` ask for an
+// expiry date so the app can warn before it runs out.
+export const DOC_TYPES: Record<DocOwner, { label: string; expires?: boolean }[]> = {
+  booking: [{ label: "Agreement" }, { label: "Customer ID" }, { label: "Payment slip" }, { label: "Other" }],
+  ledger: [{ label: "Receipt" }],
+  car_doc: [
+    { label: "Insurance", expires: true },
+    { label: "Revenue licence", expires: true },
+    { label: "Emission test", expires: true },
+    { label: "Registration (CR)" },
+    { label: "Other", expires: true },
+  ],
+  driver_doc: [{ label: "Driving licence", expires: true }, { label: "NIC" }, { label: "Other", expires: true }],
+}
+
+export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024

@@ -2,6 +2,7 @@
 
 import { z } from "zod"
 
+import { deleteFile, getFile } from "@/lib/server/files"
 import { Forbidden, requireAdmin } from "@/lib/server/guard"
 import * as repo from "@/lib/server/repo"
 import {
@@ -90,4 +91,16 @@ export async function updateDriverAction(driverId: unknown, input: unknown) {
 }
 export async function setDriverPasswordAction(driverId: unknown, password: unknown) {
   return run(() => repo.setDriverPassword(id.parse(driverId), passwordSchema.parse(password)))
+}
+
+// ---- Documents ----
+// (Uploading goes through POST /api/files because files can be large.)
+export async function deleteFileAction(fileId: unknown) {
+  return run(async () => {
+    const found = await getFile(id.parse(fileId))
+    if (!found || found.meta.ownerType === "car_image" || found.meta.ownerType === "cover") {
+      throw new repo.UserError("That file no longer exists.")
+    }
+    await deleteFile(found.meta.id)
+  })
 }

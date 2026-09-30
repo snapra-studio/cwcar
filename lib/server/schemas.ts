@@ -12,12 +12,16 @@ const text = (max: number) => z.string().trim().max(max)
 const required = (max: number, what: string) => z.string().trim().min(1, `Add ${what}`).max(max)
 const money = z.number().int().min(0).max(100_000_000)
 const id = z.string().trim().min(1).max(80)
-// Uploaded photos arrive as data URLs; cap the size so one upload can't fill the disk.
+// A photo is either a new upload (data URL, capped in size; the server moves
+// it into file storage) or an already-stored file (/api/files/<id>).
 const image = (maxBytes: number) =>
-  z
-    .string()
-    .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/, "Unsupported image")
-    .max(Math.ceil(maxBytes * 1.37), "Photo is too large")
+  z.union([
+    z
+      .string()
+      .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/, "Unsupported image")
+      .max(Math.ceil(maxBytes * 1.37), "Photo is too large"),
+    z.string().regex(/^\/api\/files\/[A-Za-z0-9_-]{16,64}$/, "Unsupported image"),
+  ])
 
 export const stopSchema = z.object({ time: optTime, loc: required(200, "a stop location") })
 

@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react"
 
 import { DEFAULT_SETTINGS } from "@/lib/bridal/logic"
-import type { Booking, BookingInput, Car, Driver, LedgerEntry, Settings } from "@/lib/bridal/types"
+import type { Booking, BookingInput, Car, DocOwner, Driver, FileMeta, LedgerEntry, Settings } from "@/lib/bridal/types"
 import * as api from "@/lib/server/admin-actions"
 
 // Admin screens' view of the data. The database on the server is the source of
@@ -34,6 +34,8 @@ export type BridalState = {
   ledger: LedgerEntry[]
   settings: Settings
   drivers: Driver[]
+  // Uploaded documents (metadata only; files are fetched from their url).
+  files: FileMeta[]
 }
 
 const EMPTY: BridalState = {
@@ -43,6 +45,7 @@ const EMPTY: BridalState = {
   ledger: [],
   settings: DEFAULT_SETTINGS,
   drivers: [],
+  files: [],
 }
 
 let state: BridalState = EMPTY
@@ -88,7 +91,15 @@ async function load() {
     data = body.state
   }
   lastLoad = Date.now()
-  set({ ready: true, cars: data.cars, bookings: data.bookings, ledger: data.ledger, settings: data.settings, drivers: data.drivers })
+  set({
+    ready: true,
+    cars: data.cars,
+    bookings: data.bookings,
+    ledger: data.ledger,
+    settings: data.settings,
+    drivers: data.drivers,
+    files: data.files ?? [],
+  })
 }
 
 function refresh() {
@@ -174,7 +185,10 @@ export async function setCarImage(id: string, image: string | undefined) {
 
 export async function removeCar(id: string) {
   await call(api.removeCarAction(id))
-  patch((s) => ({ cars: s.cars.filter((x) => x.id !== id) }))
+  patch((s) => ({
+    cars: s.cars.filter((x) => x.id !== id),
+    files: s.files.filter((f) => !(f.ownerType === "car_doc" && f.ownerId === id)),
+  }))
 }
 
 // ---- Settings ----
@@ -202,7 +216,10 @@ export async function addLedgerEntry(entry: Omit<LedgerEntry, "id" | "createdAt"
 
 export async function removeLedgerEntry(id: string) {
   await call(api.removeLedgerAction(id))
-  patch((s) => ({ ledger: s.ledger.filter((e) => e.id !== id) }))
+  patch((s) => ({
+    ledger: s.ledger.filter((e) => e.id !== id),
+    files: s.files.filter((f) => !(f.ownerType === "ledger" && f.ownerId === id)),
+  }))
 }
 
 // ---- Drivers ----
@@ -221,4 +238,34 @@ export async function updateDriver(id: string, input: Pick<Driver, "name" | "ema
 
 export async function setDriverPassword(id: string, password: string) {
   await call(api.setDriverPasswordAction(id, password))
+}
+
+// ---- Documents ----
+
+// Uploads through POST /api/files (admin-only on the server) and returns the
+// stored file's details.
+export async function uploadDocument(input: {
+  file: File
+  ownerType: DocOwner
+  ownerId: string
+  docType: string
+  expiresOn?: string
+}): Promise<FileMeta> {
+  const form = new FormData()
+  form.set("file", input.file)
+  form.set("ownerType", input.ownerType)
+  form.set("ownerId", input.ownerId)
+  form.set("docType", input.docType)
+  if (input.expiresOn) form.set("expiresOn", input.expiresOn)
+  const res = await fetch("/api/files", { method: "POST", body: form })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.error ?? "Could not upload the file. Try again.")
+  const meta = body.file as FileMeta
+  patch((s) => ({ files: [...s.files, meta] }))
+  return meta
+}
+
+export async function deleteDocument(id: string) {
+  await call(api.deleteFileAction(id))
+  patch((s) => ({ files: s.files.filter((f) => f.id !== id) }))
 }

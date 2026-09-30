@@ -6,6 +6,8 @@ import { FRESH_FLOWER_COST, pad, uid } from "@/lib/bridal/format"
 import { DEFAULT_SETTINGS, DEMO_CARS, upgradeBooking, upgradeSettings, type LegacyBooking } from "@/lib/bridal/logic"
 import type { BookedCar, Booking, Car, Driver, DriverStatus, LedgerEntry, Settings } from "@/lib/bridal/types"
 import { isUniqueViolation, q, tx, type Db, type Row } from "@/lib/server/db"
+import { UserError } from "@/lib/server/errors"
+import { deleteFilesOf, deletePhotoUrl, listAllDocs, resolvePhoto } from "@/lib/server/files"
 import { hashPassword } from "@/lib/server/password"
 import type {
   bookingInputSchema,
@@ -24,8 +26,7 @@ import type {
 // number of queries low: bookings load with their cars in one query, checks
 // are combined, and inserts are sent in bulk.
 
-// Thrown for problems the user can fix (shown as-is in the UI).
-export class UserError extends Error {}
+export { UserError }
 
 const str = (v: unknown) => (v == null ? undefined : String(v))
 const num = (v: unknown) => (v == null ? undefined : Number(v))
@@ -155,20 +156,31 @@ async function mergeSettings(patch: Partial<Settings>, removeCover = false): Pro
   return { ...DEFAULT_SETTINGS, ...JSON.parse(String(row.value)) }
 }
 
-export const saveSettings = (input: z.infer<typeof settingsSchema>) => mergeSettings(input)
+// Business details only; the landing photo is changed with setCoverImage.
+export const saveSettings = ({ coverImage: _cover, ...details }: z.infer<typeof settingsSchema>) => {
+  void _cover
+  return mergeSettings(details)
+}
 
-export const setCoverImage = (image: string | undefined) =>
-  image ? mergeSettings({ coverImage: image }) : mergeSettings({}, true)
+// Stores a new landing photo in file storage and removes the old one.
+export async function setCoverImage(image: string | undefined) {
+  const old = (await getSettings()).coverImage
+  const url = await resolvePhoto(image, "cover", "settings")
+  const next = url ? await mergeSettings({ coverImage: url }) : await mergeSettings({}, true)
+  if (old && old !== url) await deletePhotoUrl(old)
+  return next
+}
 
 // ---- Admin snapshot -----------------------------------------------------------
 
 export async function getAdminState() {
-  const [cars, bookings, ledger, kv, drivers] = await Promise.all([
+  const [cars, bookings, ledger, kv, drivers, files] = await Promise.all([
     q("SELECT * FROM cars ORDER BY name"),
     loadBookings(),
     q("SELECT * FROM ledger ORDER BY date, created_at"),
     q("SELECT key, value FROM kv WHERE key IN ('settings', 'initialized')"),
     listDrivers(),
+    listAllDocs(),
   ])
   const settings = kv.find((r) => r.key === "settings")
   return {
@@ -178,6 +190,7 @@ export async function getAdminState() {
     ledger: ledger.map(toLedger),
     settings: { ...DEFAULT_SETTINGS, ...(settings ? JSON.parse(String(settings.value)) : {}) } as Settings,
     drivers,
+    files,
   }
 }
 
@@ -209,9 +222,11 @@ export async function addCar(input: z.infer<typeof carSchema>): Promise<Car> {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 40)
+  const id = `${slug || "car"}-${uid().slice(-4)}`
+  const image = await resolvePhoto(input.image, "car_image", id)
   const [row] = await q(
     `INSERT INTO cars (${CAR_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-    carValues(`${slug || "car"}-${uid().slice(-4)}`, input)
+    carValues(id, { ...input, image })
   )
   return toCar(row)
 }
@@ -219,24 +234,41 @@ export async function addCar(input: z.infer<typeof carSchema>): Promise<Car> {
 // Existing bookings keep the car name/rate they were made with, so past
 // invoices don't change when the catalogue is edited.
 export async function updateCar(id: string, input: z.infer<typeof carSchema>): Promise<Car> {
+  const old = await carImage(id)
+  if (old === null) throw new UserError("That car no longer exists.")
+  const image = await resolvePhoto(input.image, "car_image", id)
   const [row] = await q(
     `UPDATE cars SET name = $2, color = $3, hex = $4, style = $5, plate = $6, rate = $7, image = $8, fleet = $9,
        owner_name = $10, owner_phone = $11, owner_cost = $12
      WHERE id = $1 RETURNING *`,
-    carValues(id, input)
+    carValues(id, { ...input, image })
   )
   if (!row) throw new UserError("That car no longer exists.")
+  if (old && old !== image) await deletePhotoUrl(old)
   return toCar(row)
+}
+
+// The car's current photo URL ("" if none); null if the car doesn't exist.
+async function carImage(id: string) {
+  const [r] = await q("SELECT image FROM cars WHERE id = $1", [id])
+  return r ? (str(r.image) ?? "") : null
 }
 
 export async function setCarImage(id: string, image: string | undefined): Promise<Car> {
-  const [row] = await q("UPDATE cars SET image = $2 WHERE id = $1 RETURNING *", [id, image ?? null])
+  const old = await carImage(id)
+  if (old === null) throw new UserError("That car no longer exists.")
+  const url = await resolvePhoto(image, "car_image", id)
+  const [row] = await q("UPDATE cars SET image = $2 WHERE id = $1 RETURNING *", [id, url ?? null])
   if (!row) throw new UserError("That car no longer exists.")
+  if (old && old !== url) await deletePhotoUrl(old)
   return toCar(row)
 }
 
+// Removes the car with its photo and papers (old hires keep the car name).
 export async function removeCar(id: string) {
-  await q("DELETE FROM cars WHERE id = $1", [id])
+  const [row] = await q("DELETE FROM cars WHERE id = $1 RETURNING image", [id])
+  if (row?.image) await deletePhotoUrl(String(row.image))
+  await deleteFilesOf("car_doc", [id])
 }
 
 // ---- Bookings -----------------------------------------------------------------
@@ -479,8 +511,10 @@ export async function addLedgerEntry(input: z.infer<typeof ledgerSchema>): Promi
   return toLedger(row)
 }
 
+// Removes the entry and any receipt attached to it.
 export async function removeLedgerEntry(id: string) {
   await q("DELETE FROM ledger WHERE id = $1", [id])
+  await deleteFilesOf("ledger", [id])
 }
 
 // ---- Drivers ------------------------------------------------------------------
@@ -627,6 +661,16 @@ type ImportPayload = {
 // Moves data an older version saved in the admin's browser into the database,
 // once. With nothing to import, starts with the demo fleet.
 export async function initializeFrom(payload: ImportPayload | null) {
+  // Photos saved in the browser were data URLs; put them in file storage first.
+  if (payload?.cars) {
+    payload = {
+      ...payload,
+      cars: await Promise.all(payload.cars.map(async (c) => ({ ...c, image: await resolvePhoto(c.image, "car_image", c.id) }))),
+    }
+  }
+  if (payload?.settings?.coverImage) {
+    payload = { ...payload, settings: { ...payload.settings, coverImage: await resolvePhoto(payload.settings.coverImage, "cover", "settings") } }
+  }
   return tx(async (db) => {
     // Lock the flag row so two first-runs can't both import.
     await db.query("INSERT INTO kv (key, value) VALUES ('initializing', '1') ON CONFLICT (key) DO NOTHING")

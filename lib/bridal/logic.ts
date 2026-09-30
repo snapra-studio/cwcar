@@ -110,3 +110,12 @@ export function upgradeBooking(b: LegacyBooking): Booking {
     cars: list.map((c) => (c.pickupTime === undefined ? { ...shared, ...c } : (c as BookedCar))),
   }
 }
+
+// Document expiry: "expired", "soon" (within 30 days) or "ok".
+export type ExpiryStatus = "expired" | "soon" | "ok"
+export function expiryStatus(expiresOn: string | undefined, today: string): ExpiryStatus | undefined {
+  if (!expiresOn) return undefined
+  if (expiresOn < today) return "expired"
+  const days = (Date.parse(expiresOn) - Date.parse(today)) / 86_400_000
+  return days <= 30 ? "soon" : "ok"
+}

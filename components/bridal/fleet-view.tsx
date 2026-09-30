@@ -1,11 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { ImagePlusIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { FileTextIcon, ImagePlusIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { CarPhoto, Swatch } from "@/components/bridal/car-art"
 import { ConfirmAction } from "@/components/bridal/confirm-action"
+import { ExpiryWarning, FilesDialog } from "@/components/bridal/files-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -190,6 +191,8 @@ function FleetGrid() {
 }
 
 function FleetCard({ car: c, nextHire }: { car: Car; nextHire?: string }) {
+  const { files } = useBridal()
+  const docs = files.filter((f) => f.ownerType === "car_doc" && f.ownerId === c.id)
   return (
     <article className="group/photo overflow-hidden rounded-3xl border bg-card transition-colors hover:border-primary/40">
       <div className="relative">
@@ -216,6 +219,7 @@ function FleetCard({ car: c, nextHire }: { car: Car; nextHire?: string }) {
               {c.ownerPhone && ` · ${c.ownerPhone}`}
             </span>
           )}
+          <ExpiryWarning files={docs} />
         </div>
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
@@ -246,6 +250,18 @@ function FleetCard({ car: c, nextHire }: { car: Car; nextHire?: string }) {
               </Button>
             )}
             <EditCarDialog car={c} />
+            <FilesDialog
+              ownerType="car_doc"
+              ownerId={c.id}
+              title={`Documents · ${c.name}`}
+              description="Insurance, revenue licence, emission test, registration. Add an expiry date to get a warning before it runs out."
+              trigger={
+                <Button size="sm" variant="outline" className="rounded-full">
+                  <FileTextIcon data-icon="inline-start" />
+                  Documents{docs.length ? ` (${docs.length})` : ""}
+                </Button>
+              }
+            />
             <ConfirmAction
               trigger={
                 <Button size="sm" variant="destructive" className="rounded-full">
