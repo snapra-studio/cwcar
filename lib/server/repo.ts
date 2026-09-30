@@ -13,7 +13,7 @@ import {
   upgradeSettings,
   type LegacyBooking,
 } from "@/lib/bridal/logic"
-import type { BookedCar, Booking, Car, Driver, DriverStatus, LedgerEntry, Settings } from "@/lib/bridal/types"
+import type { BookedCar, Booking, Car, Driver, DriverStatus, IndirectExpense, LedgerEntry, Settings } from "@/lib/bridal/types"
 import { isUniqueViolation, q, tx, type Db, type Row } from "@/lib/server/db"
 import { UserError } from "@/lib/server/errors"
 import { deleteFilesOf, deletePhotoUrl, listAllDocs, resolvePhoto } from "@/lib/server/files"
@@ -23,6 +23,8 @@ import type {
   carSchema,
   driverCreateSchema,
   driverUpdateSchema,
+  indirectAssignSchema,
+  indirectSchema,
   ledgerSchema,
   settingsSchema,
 } from "@/lib/server/schemas"
@@ -185,13 +187,14 @@ export async function setCoverImage(image: string | undefined) {
 // ---- Admin snapshot -----------------------------------------------------------
 
 export async function getAdminState() {
-  const [cars, bookings, ledger, kv, drivers, files] = await Promise.all([
+  const [cars, bookings, ledger, kv, drivers, files, indirect] = await Promise.all([
     q("SELECT * FROM cars ORDER BY name"),
     loadBookings(),
     q("SELECT * FROM ledger ORDER BY date, created_at"),
     q("SELECT key, value FROM kv WHERE key IN ('settings', 'initialized')"),
     listDrivers(),
     listAllDocs(),
+    listIndirect(),
   ])
   const settings = kv.find((r) => r.key === "settings")
   return {
@@ -202,6 +205,7 @@ export async function getAdminState() {
     settings: { ...DEFAULT_SETTINGS, ...(settings ? JSON.parse(String(settings.value)) : {}) } as Settings,
     drivers,
     files,
+    indirect,
   }
 }
 
@@ -866,4 +870,58 @@ export async function ensureDevDriver() {
     await q("INSERT INTO kv (key, value) VALUES ('dev_driver_seeded', '1') ON CONFLICT (key) DO NOTHING")
   }
   devDriverChecked = true
+}
+
+// ---- Indirect expenses (not tied to a hire) ------------------------------------
+
+function toIndirect(r: Row): IndirectExpense {
+  return {
+    id: String(r.id),
+    date: String(r.date),
+    category: String(r.category),
+    carId: str(r.car_id),
+    carName: String(r.car_name ?? ""),
+    note: String(r.note ?? ""),
+    amount: Number(r.amount),
+    createdAt: String(r.created_at),
+  }
+}
+
+export async function listIndirect() {
+  return (await q("SELECT * FROM indirect_expenses ORDER BY date, created_at")).map(toIndirect)
+}
+
+// Keep the vehicle's name with the record (a snapshot, like hires do).
+async function vehicleName(carId: string | undefined | null) {
+  if (!carId) return ""
+  const [car] = await q("SELECT name, color FROM cars WHERE id = $1", [carId])
+  if (!car) throw new UserError("That vehicle no longer exists.")
+  return `${car.name} (${car.color})`
+}
+
+export async function addIndirect(input: z.infer<typeof indirectSchema>): Promise<IndirectExpense> {
+  const carName = await vehicleName(input.carId)
+  const [row] = await q(
+    `INSERT INTO indirect_expenses (id, date, category, car_id, car_name, note, amount)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [uid(), input.date, input.category, input.carId ?? null, carName, input.note, input.amount]
+  )
+  return toIndirect(row)
+}
+
+export async function assignIndirect(input: z.infer<typeof indirectAssignSchema>): Promise<IndirectExpense> {
+  const carName = await vehicleName(input.carId)
+  const [row] = await q("UPDATE indirect_expenses SET car_id = $2, car_name = $3 WHERE id = $1 RETURNING *", [
+    input.id,
+    input.carId,
+    carName,
+  ])
+  if (!row) throw new UserError("That expense no longer exists.")
+  return toIndirect(row)
+}
+
+// Removes the entry and any receipt attached to it.
+export async function removeIndirect(id: string) {
+  await q("DELETE FROM indirect_expenses WHERE id = $1", [id])
+  await deleteFilesOf("indirect", [id])
 }

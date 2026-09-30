@@ -3,7 +3,17 @@
 import { useSyncExternalStore } from "react"
 
 import { DEFAULT_SETTINGS } from "@/lib/bridal/logic"
-import type { Booking, BookingInput, Car, DocOwner, Driver, FileMeta, LedgerEntry, Settings } from "@/lib/bridal/types"
+import type {
+  Booking,
+  BookingInput,
+  Car,
+  DocOwner,
+  Driver,
+  FileMeta,
+  IndirectExpense,
+  LedgerEntry,
+  Settings,
+} from "@/lib/bridal/types"
 import * as api from "@/lib/server/admin-actions"
 
 // Admin screens' view of the data. The database on the server is the source of
@@ -42,6 +52,8 @@ export type BridalState = {
   drivers: Driver[]
   // Uploaded documents (metadata only; files are fetched from their url).
   files: FileMeta[]
+  // Business costs not tied to a hire.
+  indirect: IndirectExpense[]
 }
 
 const EMPTY: BridalState = {
@@ -52,6 +64,7 @@ const EMPTY: BridalState = {
   settings: DEFAULT_SETTINGS,
   drivers: [],
   files: [],
+  indirect: [],
 }
 
 let state: BridalState = EMPTY
@@ -105,6 +118,7 @@ async function load() {
     settings: data.settings,
     drivers: data.drivers,
     files: data.files ?? [],
+    indirect: data.indirect ?? [],
   })
 }
 
@@ -274,4 +288,27 @@ export async function uploadDocument(input: {
 export async function deleteDocument(id: string) {
   await call(api.deleteFileAction(id))
   patch((s) => ({ files: s.files.filter((f) => f.id !== id) }))
+}
+
+// ---- Indirect expenses ----
+
+export async function addIndirect(entry: { date: string; category: string; carId?: string; note: string; amount: number }) {
+  const e = await call(api.addIndirectAction(entry))
+  patch((s) => ({ indirect: [...s.indirect, e] }))
+  return e
+}
+
+// Links an expense to a vehicle (or to none, with null).
+export async function assignIndirect(id: string, carId: string | null) {
+  const e = await call(api.assignIndirectAction({ id, carId }))
+  patch((s) => ({ indirect: s.indirect.map((x) => (x.id === id ? e : x)) }))
+  return e
+}
+
+export async function removeIndirect(id: string) {
+  await call(api.removeIndirectAction(id))
+  patch((s) => ({
+    indirect: s.indirect.filter((e) => e.id !== id),
+    files: s.files.filter((f) => !(f.ownerType === "indirect" && f.ownerId === id)),
+  }))
 }

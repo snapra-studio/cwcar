@@ -79,6 +79,31 @@ export type LedgerEntry = {
   createdAt: string
 }
 
+// Business costs not tied to one hire (overheads). carId optionally names
+// the vehicle it was for; carName is kept even if the car is later removed.
+export type IndirectExpense = {
+  id: string
+  date: string
+  category: string
+  carId?: string
+  carName: string
+  note: string
+  amount: number
+  createdAt: string
+}
+
+export const INDIRECT_CATEGORIES = [
+  "Vehicle service",
+  "Vehicle finance / lease",
+  "Car wash",
+  "Decoration cloths & flowers",
+  "Fuel (not for a hire)",
+  "Repairs & parts",
+  "Insurance & licence",
+  "Driver salary",
+  "Other",
+]
+
 export const EXPENSE_CATEGORIES = ["Petrol", "Driver", "Toll & parking", "Decoration", "Repairs", "Other"]
 export const INCOME_CATEGORIES = ["Extra hours", "Extra kilometres", "Waiting charge", "Decoration", "Other"]
 
@@ -134,7 +159,7 @@ export type Settings = {
 
 // What a document is attached to. Car photos and the landing photo are
 // handled separately (they're public and replace each other).
-export type DocOwner = "booking" | "ledger" | "car_doc" | "driver_doc"
+export type DocOwner = "booking" | "ledger" | "car_doc" | "driver_doc" | "indirect"
 
 export type FileMeta = {
   id: string
@@ -155,6 +180,7 @@ export type FileMeta = {
 export const DOC_TYPES: Record<DocOwner, { label: string; expires?: boolean }[]> = {
   booking: [{ label: "Agreement" }, { label: "Customer ID" }, { label: "Payment slip" }, { label: "Other" }],
   ledger: [{ label: "Receipt" }],
+  indirect: [{ label: "Receipt" }],
   car_doc: [
     { label: "Insurance", expires: true },
     { label: "Revenue licence", expires: true },

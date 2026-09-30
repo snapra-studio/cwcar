@@ -149,7 +149,7 @@ export async function listFiles(ownerType: DocOwner, ownerId: string) {
 // Every document (not the public photos), for the admin screens.
 export async function listAllDocs() {
   return (
-    await q("SELECT * FROM files WHERE owner_type IN ('booking', 'ledger', 'car_doc', 'driver_doc') ORDER BY uploaded_at")
+    await q("SELECT * FROM files WHERE owner_type IN ('booking', 'ledger', 'car_doc', 'driver_doc', 'indirect') ORDER BY uploaded_at")
   ).map(toMeta)
 }
 
@@ -172,7 +172,7 @@ export async function deletePhotoUrl(url: string | undefined) {
 
 // Does the thing a document is being attached to exist?
 export async function ownerExists(ownerType: DocOwner, ownerId: string) {
-  const table = { booking: "bookings", ledger: "ledger", car_doc: "cars", driver_doc: "users" }[ownerType]
+  const table = { booking: "bookings", ledger: "ledger", car_doc: "cars", driver_doc: "users", indirect: "indirect_expenses" }[ownerType]
   const rows = await q(`SELECT 1 FROM ${table} WHERE id = $1`, [ownerId])
   return rows.length > 0
 }

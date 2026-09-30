@@ -2,7 +2,7 @@ import ExcelJS from "exceljs"
 
 import { fmtTime } from "@/lib/bridal/format"
 import { hireMoney, isActive, startTime } from "@/lib/bridal/store"
-import type { Booking, LedgerEntry } from "@/lib/bridal/types"
+import type { Booking, IndirectExpense, LedgerEntry } from "@/lib/bridal/types"
 
 const HEAD = "FFC48C5A"
 const INK = "FF6B4520"
@@ -197,6 +197,11 @@ export async function downloadBookingsExcel(all: Booking[], ledger: LedgerEntry[
   }
   styleHeader(money2)
 
+  await saveWorkbook(wb, `bookings_${from}_to_${to}.xlsx`)
+  return bookings.length
+}
+
+async function saveWorkbook(wb: ExcelJS.Workbook, fileName: string) {
   const buffer = await wb.xlsx.writeBuffer()
   const blob = new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -204,8 +209,72 @@ export async function downloadBookingsExcel(all: Booking[], ledger: LedgerEntry[
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url
-  a.download = `bookings_${from}_to_${to}.xlsx`
+  a.download = fileName
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
-  return bookings.length
+}
+
+// Indirect expenses (not tied to a hire) dated from..to inclusive: every
+// entry, plus a total per category.
+export async function downloadIndirectExcel(
+  all: IndirectExpense[],
+  receiptsFor: (id: string) => number,
+  from: string,
+  to: string
+) {
+  const entries = all
+    .filter((e) => e.date >= from && e.date <= to)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
+
+  const wb = new ExcelJS.Workbook()
+  wb.creator = "Crish Wedding Hires"
+  wb.created = new Date()
+
+  const list = wb.addWorksheet("Indirect expenses")
+  list.columns = [
+    { header: "Date", key: "date", width: 12 },
+    { header: "Category", key: "category", width: 26 },
+    { header: "Vehicle", key: "car", width: 28 },
+    { header: "Note", key: "note", width: 44 },
+    { header: "Amount (LKR)", key: "amount", width: 15, style: { numFmt: MONEY } },
+    { header: "Receipt", key: "receipt", width: 10 },
+  ]
+  for (const e of entries) {
+    list.addRow({
+      date: dmy(e.date),
+      category: e.category,
+      car: e.carName || "—",
+      note: e.note,
+      amount: e.amount,
+      receipt: receiptsFor(e.id) ? "Yes" : "",
+    })
+  }
+  const total = entries.reduce((n, e) => n + e.amount, 0)
+  list.addRow({})
+  styleTotal(list.addRow({ note: `Total (${entries.length} entries)`, amount: total }))
+  styleHeader(list)
+
+  const byCat = wb.addWorksheet("By category")
+  byCat.columns = [
+    { header: "Category", key: "category", width: 28 },
+    { header: "Entries", key: "count", width: 10 },
+    { header: "Amount (LKR)", key: "amount", width: 15, style: { numFmt: MONEY } },
+    { header: "Share", key: "share", width: 10, style: { numFmt: "0%" } },
+  ]
+  const groups = new Map<string, { count: number; amount: number }>()
+  for (const e of entries) {
+    const g = groups.get(e.category) ?? { count: 0, amount: 0 }
+    g.count += 1
+    g.amount += e.amount
+    groups.set(e.category, g)
+  }
+  for (const [category, g] of [...groups].sort((a, b) => b[1].amount - a[1].amount)) {
+    byCat.addRow({ category, count: g.count, amount: g.amount, share: total ? g.amount / total : 0 })
+  }
+  byCat.addRow({})
+  styleTotal(byCat.addRow({ category: "Total", count: entries.length, amount: total, share: total ? 1 : 0 }))
+  styleHeader(byCat)
+
+  await saveWorkbook(wb, `indirect-expenses_${from}_to_${to}.xlsx`)
+  return entries.length
 }

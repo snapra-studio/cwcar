@@ -5,6 +5,7 @@ import { FileTextIcon, ImagePlusIcon, PencilIcon, PlusIcon, Trash2Icon } from "l
 import { toast } from "sonner"
 
 import { CarPhoto, Swatch } from "@/components/bridal/car-art"
+import { CarExpensesDialog } from "@/components/bridal/car-expenses-dialog"
 import { ConfirmAction } from "@/components/bridal/confirm-action"
 import { ExpiryWarning, FilesDialog } from "@/components/bridal/files-dialog"
 import { Button } from "@/components/ui/button"
@@ -250,6 +251,7 @@ function FleetCard({ car: c, nextHire }: { car: Car; nextHire?: string }) {
               </Button>
             )}
             <EditCarDialog car={c} />
+            <CarExpensesDialog car={c} />
             <FilesDialog
               ownerType="car_doc"
               ownerId={c.id}

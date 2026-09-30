@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { ConfirmAction } from "@/components/bridal/confirm-action"
 import { FilesDialog } from "@/components/bridal/files-dialog"
+import { IndirectExpensesCard, indirectInPeriod } from "@/components/bridal/indirect-expenses"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -43,7 +44,7 @@ export function FinanceView({ initialHireId }: { initialHireId?: string }) {
 }
 
 function Finance({ initialHireId }: { initialHireId?: string }) {
-  const { bookings, ledger } = useBridal()
+  const { bookings, ledger, indirect } = useBridal()
   const linked = bookings.find((b) => b.id === initialHireId)
   // Opening from a hire shows the month that hire falls in.
   const [[from, to], setRange] = React.useState(() =>
@@ -69,6 +70,8 @@ function Finance({ initialHireId }: { initialHireId?: string }) {
       { hire: 0, extra: 0, out: 0, profit: 0 }
     )
   const totals = sumRows(rows)
+  // Overheads in the period (services, car washes…) come off the profit.
+  const indirectTotal = valid ? indirectInPeriod(indirect, from, to).reduce((n, e) => n + e.amount, 0) : 0
 
   // Searching by invoice number looks across every date, not just the period,
   // so an old hire can be found without changing the dates.
@@ -119,12 +122,13 @@ function Finance({ initialHireId }: { initialHireId?: string }) {
         </CardContent>
       </Card>
 
-      <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[
           { label: "Hire income", value: totals.hire },
           { label: "Extra income", value: totals.extra },
-          { label: "Expenses", value: totals.out, hint: "incl. partner owners" },
-          { label: "Profit", value: totals.profit, strong: true },
+          { label: "Hire expenses", value: totals.out, hint: "incl. partner owners" },
+          { label: "Indirect expenses", value: indirectTotal, hint: "not tied to a hire" },
+          { label: "Net profit", value: totals.profit - indirectTotal, strong: true },
         ].map((s) => (
           <div key={s.label} className={cn("grid gap-1 rounded-xl border bg-card p-4", s.strong && "border-primary/40 bg-primary/10")}>
             <dt className="text-xs tracking-widest text-muted-foreground uppercase">
@@ -220,6 +224,8 @@ function Finance({ initialHireId }: { initialHireId?: string }) {
           )}
         </CardContent>
       </Card>
+
+      <IndirectExpensesCard from={from} to={to} valid={valid} />
     </div>
   )
 }

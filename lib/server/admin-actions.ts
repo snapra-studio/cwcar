@@ -11,6 +11,8 @@ import {
   driverCreateSchema,
   driverUpdateSchema,
   firstIssue,
+  indirectAssignSchema,
+  indirectSchema,
   ledgerSchema,
   passwordSchema,
   settingsSchema,
@@ -103,4 +105,15 @@ export async function deleteFileAction(fileId: unknown) {
     }
     await deleteFile(found.meta.id)
   })
+}
+
+// ---- Indirect expenses ----
+export async function addIndirectAction(input: unknown) {
+  return run(() => repo.addIndirect(indirectSchema.parse(input)))
+}
+export async function assignIndirectAction(input: unknown) {
+  return run(() => repo.assignIndirect(indirectAssignSchema.parse(input)))
+}
+export async function removeIndirectAction(entryId: unknown) {
+  return run(() => repo.removeIndirect(id.parse(entryId)))
 }

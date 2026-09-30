@@ -10,7 +10,11 @@ const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a HH:MM time")
 const optTime = z.union([time, z.literal("")])
 const text = (max: number) => z.string().trim().max(max)
 const required = (max: number, what: string) => z.string().trim().min(1, `Add ${what}`).max(max)
-const money = z.number().int().min(0).max(100_000_000)
+const money = z
+  .number({ error: "Enter an amount." })
+  .int("Use whole rupees.")
+  .min(0, "Amounts can't be negative.")
+  .max(100_000_000, "That amount is too large.")
 const id = z.string().trim().min(1).max(80)
 // A photo is either a new upload (data URL, capped in size; the server moves
 // it into file storage) or an already-stored file (/api/files/<id>).
@@ -95,6 +99,17 @@ export const ledgerSchema = z.object({
   amount: money.refine((n) => n > 0, "Add an amount"),
   date: isoDate,
 })
+
+export const indirectSchema = z.object({
+  date: isoDate,
+  category: required(60, "a category"),
+  carId: id.optional(),
+  note: text(300),
+  amount: money.refine((n) => n > 0, "Add an amount"),
+})
+
+// Assigns an indirect expense to a vehicle, or (null) to none.
+export const indirectAssignSchema = z.object({ id, carId: id.nullable() })
 
 const password = z.string().min(8, "Use at least 8 characters").max(200)
 
