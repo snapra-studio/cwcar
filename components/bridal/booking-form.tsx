@@ -32,7 +32,18 @@ import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { fmtDate, FRESH_FLOWER_COST, rs, todayIso, uid } from "@/lib/bridal/format"
-import { addBooking, bookingFor, sortCars, updateBooking, useBridal } from "@/lib/bridal/store"
+import {
+  addBooking,
+  bookingMoney,
+  carSlotsOn,
+  describeGap,
+  fmtMinutes,
+  freeGaps,
+  sortCars,
+  toMinutes,
+  updateBooking,
+  useBridal,
+} from "@/lib/bridal/store"
 import {
   isPartner,
   type Booking,
@@ -61,6 +72,8 @@ const EMPTY = {
   phone: "",
   address: "",
   deco: "artificial" as Decoration,
+  decoNotes: "",
+  discount: "0",
   advance: "0",
 }
 
@@ -121,7 +134,9 @@ function BookingFormInner({
       }))
     }
     const first = cars.find((c) => c.id === initialCarId)
-    return first && !bookingFor(bookings, first.id, initialDate || todayIso())
+    // Cars are booked by time slot now, so a car with other hires that day
+    // can still be picked; the route's times are checked instead.
+    return first
       ? [{ carId: first.id, amount: String(first.rate), ownerCost: defaultOwnerCost(first), driverId: "", route: EMPTY_ROUTE }]
       : []
   })
@@ -133,6 +148,8 @@ function BookingFormInner({
           phone: editing.phone,
           address: editing.address,
           deco: editing.deco,
+          decoNotes: editing.decoNotes ?? "",
+          discount: String(editing.discount ?? 0),
           advance: String(editing.advance),
         }
       : EMPTY
@@ -161,7 +178,22 @@ function BookingFormInner({
       ownerCost: bc.ownerCost,
     }))
   const allCars = [...sortCars(cars), ...removedCars]
-  const taken = (carId: string, day: string) => !!bookingFor(bookings, carId, day, editing?.id)
+  // This car's other active hires on the chosen date (not counting the
+  // booking being edited), as time slots.
+  const daySlots = (carId: string) => carSlotsOn(bookings, carId, date, editing?.id)
+  const slotText = (x: { start: number; end: number }) => `${fmtMinutes(x.start)} – ${fmtMinutes(x.end)}`
+
+  // What's wrong with a car's times, if anything: drop-off not after pick-up,
+  // or overlapping another hire of the same car (same rule as the server).
+  function timeIssue(carId: string, route: RouteRows) {
+    const start = toMinutes(route.pickupTime)
+    const end = toMinutes(route.dropTime)
+    if (Number.isNaN(start) || Number.isNaN(end)) return ""
+    if (end <= start) return "The drop-off time must be later than the pick-up time."
+    const hit = daySlots(carId).filter((x) => start < x.end && end > x.start)
+    if (!hit.length) return ""
+    return `Overlaps another hire of this car: ${hit.map((x) => `${slotText(x)} (${x.booking.invNo})`).join(", ")}.`
+  }
 
   const selected = picked.flatMap((p) => {
     const car = allCars.find((c) => c.id === p.carId)
@@ -180,9 +212,10 @@ function BookingFormInner({
   })
   const rate = selected.reduce((sum, s) => sum + s.amount, 0)
   const decoCost = form.deco === "fresh" ? FRESH_FLOWER_COST * selected.length : 0
-  const total = rate + decoCost
   const advance = Math.max(0, Number(form.advance) || 0)
-  const balance = Math.max(0, total - advance)
+  const discountIn = Math.max(0, Number(form.discount) || 0)
+  // Same maths as the server and the invoice (lib/bridal/logic.ts).
+  const { subtotal, discount, total, balance } = bookingMoney({ rate, decoCost, discount: discountIn, advance })
 
   // Ticking a car pre-fills its standard rate and a copy of the first car's
   // route; both stay editable per car.
@@ -223,8 +256,8 @@ function BookingFormInner({
   }
 
   function changeDate(value: string) {
+    // Picked cars stay; their times are re-checked against the new date.
     setDate(value)
-    setPicked((all) => all.filter((p) => !taken(p.carId, value)))
   }
 
   function reset() {
@@ -250,10 +283,16 @@ function BookingFormInner({
       setError(`Add: ${missing.join(", ")}.`)
       return
     }
-    const clash = selected.filter((s) => taken(s.car.id, date))
-    if (clash.length) {
-      setError(`Already booked on that date: ${clash.map((s) => s.car.name).join(", ")}. Pick other cars.`)
-      setPicked((all) => all.filter((p) => !clash.some((s) => s.car.id === p.carId)))
+    const issues = selected.flatMap((s) => {
+      const issue = timeIssue(s.car.id, s.route)
+      return issue ? [`${s.car.name}: ${issue}`] : []
+    })
+    if (issues.length) {
+      setError(issues.join(" "))
+      return
+    }
+    if (discountIn > subtotal) {
+      setError("The discount can't be more than the hire amount.")
       return
     }
     const isRemoved = (id: string) => removedCars.some((c) => c.id === id)
@@ -278,8 +317,10 @@ function BookingFormInner({
         phone: form.phone.trim(),
         address: form.address.trim(),
         deco: form.deco,
+        decoNotes: form.decoNotes.trim(),
         rate,
         decoCost,
+        discount,
         total,
         advance,
         balance,
@@ -323,7 +364,7 @@ function BookingFormInner({
                   <FieldDescription>Tick one or more cars for this order.</FieldDescription>
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3">
                     {allCars.map((c) => {
-                      const isTaken = taken(c.id, date)
+                      const slots = daySlots(c.id)
                       const on = picked.some((p) => p.carId === c.id)
                       return (
                         <FieldLabel
@@ -331,7 +372,7 @@ function BookingFormInner({
                           htmlFor={`car-${c.id}`}
                           className={cn(on && "border-primary bg-primary/10 ring-1 ring-primary")}
                         >
-                          <Field orientation="horizontal" data-disabled={isTaken}>
+                          <Field orientation="horizontal">
                             <FieldContent>
                               <CarPhoto car={c} sizes="200px" className="rounded-md" />
                               <FieldTitle className="flex-wrap">
@@ -340,17 +381,24 @@ function BookingFormInner({
                               </FieldTitle>
                               <FieldDescription className="flex w-full justify-between gap-2">
                                 <span>{c.color}</span>
-                                {isTaken ? (
-                                  <Badge variant="destructive">Booked</Badge>
-                                ) : (
-                                  <span className="font-medium text-foreground">{rs(c.rate)}</span>
-                                )}
+                                <span className="font-medium text-foreground">{rs(c.rate)}</span>
                               </FieldDescription>
+                              {slots.length > 0 && (
+                                <div className="grid gap-0.5 text-xs">
+                                  <Badge variant="secondary" className="w-fit">
+                                    {slots.length} hire{slots.length === 1 ? "" : "s"} this day
+                                  </Badge>
+                                  {slots.map((x, i) => (
+                                    <span key={i} className="text-muted-foreground">
+                                      Booked {slotText(x)}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </FieldContent>
                             <Checkbox
                               id={`car-${c.id}`}
                               checked={on}
-                              disabled={isTaken}
                               onCheckedChange={(v) => toggleCar(c.id, v === true)}
                               className="data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
                             />
@@ -444,6 +492,9 @@ function BookingFormInner({
                           i > 0 ? () => setRoute(s.car.id, cloneRoute(selected[0].route)) : undefined
                         }
                         firstName={selected[0].car.name}
+                        booked={daySlots(s.car.id)}
+                        // Hidden while saving: the new hire lands in the data just before the form resets.
+                        timeIssue={saving ? "" : timeIssue(s.car.id, s.route)}
                         drivers={drivers.filter((d) => d.status === "active" || d.id === s.driverId)}
                         driverId={s.driverId}
                         onDriverChange={(driverId) => setDriver(s.car.id, driverId)}
@@ -478,6 +529,18 @@ function BookingFormInner({
                     </FieldLabel>
                   ))}
                 </RadioGroup>
+                <Field>
+                  <FieldLabel htmlFor="decoNotes">Other Decoration Details / Customer Request</FieldLabel>
+                  <Textarea
+                    id="decoNotes"
+                    rows={3}
+                    maxLength={1000}
+                    placeholder="Enter any additional flower decoration details or special customer requests..."
+                    value={form.decoNotes}
+                    onChange={set("decoNotes")}
+                  />
+                  <FieldDescription>Shown on the invoice and to the driver.</FieldDescription>
+                </Field>
               </FieldSet>
 
               <FieldSeparator />
@@ -530,6 +593,21 @@ function BookingFormInner({
                 )}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field>
+                    <FieldLabel htmlFor="discount">Discount Amount (LKR)</FieldLabel>
+                    <Input
+                      id="discount"
+                      type="number"
+                      min={0}
+                      step={500}
+                      value={form.discount}
+                      onChange={set("discount")}
+                      aria-invalid={discountIn > subtotal}
+                    />
+                    <FieldDescription>
+                      {discountIn > subtotal ? "Can't be more than the hire amount." : "An amount, not a percentage."}
+                    </FieldDescription>
+                  </Field>
+                  <Field>
                     <FieldLabel htmlFor="advance">Advance paid (Rs)</FieldLabel>
                     <Input
                       id="advance"
@@ -541,6 +619,11 @@ function BookingFormInner({
                     />
                   </Field>
                 </div>
+                <p className="text-sm text-muted-foreground">
+                  Subtotal {rs(subtotal)}
+                  {discount > 0 && ` − discount ${rs(discount)}`} = <span className="font-semibold text-foreground">total {rs(total)}</span>{" "}
+                  − advance {rs(advance)} = <span className="font-semibold text-foreground">balance {rs(balance)}</span>
+                </p>
               </FieldSet>
 
               {error && <FieldError>{error}</FieldError>}
@@ -597,6 +680,8 @@ function BookingFormInner({
             value={decoCost ? rs(decoCost) : "Free"}
           />
           <Separator />
+          <SummaryLine label="Subtotal / hire amount" value={rs(subtotal)} />
+          {discount > 0 && <SummaryLine label="Discount" value={`− ${rs(discount)}`} />}
           <div className="flex justify-between text-base font-semibold">
             <span>Total</span>
             <span>{rs(total)}</span>
@@ -638,6 +723,8 @@ function RouteEditor({
   onChange,
   onCopyFirst,
   firstName,
+  booked,
+  timeIssue,
   drivers,
   driverId,
   onDriverChange,
@@ -648,6 +735,9 @@ function RouteEditor({
   onChange: (route: RouteRows) => void
   onCopyFirst?: () => void
   firstName: string
+  // This car's other hires that day, and what's wrong with the chosen times.
+  booked: { start: number; end: number }[]
+  timeIssue: string
   drivers: Driver[]
   driverId: string
   onDriverChange: (driverId: string) => void
@@ -670,6 +760,16 @@ function RouteEditor({
             </Button>
           )}
         </div>
+      )}
+      {booked.length > 0 && (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
+          <span className="font-medium">This car is booked that day: </span>
+          {booked.map((x) => `${fmtMinutes(x.start)} – ${fmtMinutes(x.end)}`).join(", ")}
+          <span className="text-muted-foreground">
+            {" "}
+            · Free: {freeGaps(booked).map(describeGap).join(", ") || "none"}
+          </span>
+        </p>
       )}
       <Field className="sm:max-w-sm">
         <FieldLabel htmlFor={id("driver")}>Driver</FieldLabel>
@@ -747,6 +847,7 @@ function RouteEditor({
           <Input id={id("dropLoc")} value={route.dropLoc} onChange={set("dropLoc")} />
         </Field>
       </div>
+      {timeIssue && <FieldError role="alert">{timeIssue}</FieldError>}
     </div>
   )
 }

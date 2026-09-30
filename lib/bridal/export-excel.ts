@@ -54,6 +54,7 @@ export async function downloadBookingsExcel(all: Booking[], ledger: LedgerEntry[
     { header: "Car hire (LKR)", key: "rate", width: 15, style: { numFmt: MONEY } },
     { header: "Decoration", key: "deco", width: 12 },
     { header: "Decoration (LKR)", key: "decoCost", width: 16, style: { numFmt: MONEY } },
+    { header: "Discount (LKR)", key: "discount", width: 14, style: { numFmt: MONEY } },
     { header: "Total (LKR)", key: "total", width: 14, style: { numFmt: MONEY } },
     { header: "Advance (LKR)", key: "advance", width: 14, style: { numFmt: MONEY } },
     { header: "Balance (LKR)", key: "balance", width: 14, style: { numFmt: MONEY } },
@@ -62,6 +63,7 @@ export async function downloadBookingsExcel(all: Booking[], ledger: LedgerEntry[
     { header: "Owner payments (LKR)", key: "owner", width: 19, style: { numFmt: MONEY } },
     { header: "Profit (LKR)", key: "profit", width: 14, style: { numFmt: MONEY } },
     { header: "Invoice date", key: "issued", width: 12 },
+    { header: "Decoration notes", key: "decoNotes", width: 40 },
   ]
   for (const b of bookings) {
     const m = hireMoney(b, ledger)
@@ -79,6 +81,8 @@ export async function downloadBookingsExcel(all: Booking[], ledger: LedgerEntry[
       rate: b.rate,
       deco: b.deco === "fresh" ? "Fresh" : "Artificial",
       decoCost: b.decoCost,
+      discount: b.discount ?? 0,
+      decoNotes: b.decoNotes ?? "",
       total: b.total,
       advance: b.advance,
       balance: b.balance,
@@ -91,7 +95,7 @@ export async function downloadBookingsExcel(all: Booking[], ledger: LedgerEntry[
     if (!isActive(b)) row.font = { color: { argb: "FF999999" }, strike: true }
   }
   const active = bookings.filter(isActive)
-  const sum = (k: "rate" | "decoCost" | "total" | "advance" | "balance") =>
+  const sum = (k: "rate" | "decoCost" | "discount" | "total" | "advance" | "balance") =>
     active.reduce((n, b) => n + b[k], 0)
   const money = active.map((b) => hireMoney(b, ledger))
   const sumM = (k: "extraIncome" | "expenses" | "partnerCost" | "profit") => money.reduce((n, m) => n + m[k], 0)
@@ -102,6 +106,7 @@ export async function downloadBookingsExcel(all: Booking[], ledger: LedgerEntry[
       count: active.reduce((n, b) => n + b.cars.length, 0),
       rate: sum("rate"),
       decoCost: sum("decoCost"),
+      discount: sum("discount"),
       total: sum("total"),
       advance: sum("advance"),
       balance: sum("balance"),

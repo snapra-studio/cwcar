@@ -45,7 +45,7 @@ import {
   rs,
   todayIso,
 } from "@/lib/bridal/format"
-import { bookingFor, carTimes, isActive, sortCars, useBridal } from "@/lib/bridal/store"
+import { carSlotsOn, describeGap, fmtMinutes, freeGaps, isActive, sortCars, useBridal } from "@/lib/bridal/store"
 import type { Booking } from "@/lib/bridal/types"
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -99,8 +99,13 @@ function Availability() {
   const daysInMonth = new Date(view.y, view.m + 1, 0).getDate()
 
   const past = selDate < today
-  const dayRows = sorted.map((car) => ({ car, booking: bookingFor(bookings, car.id, selDate) }))
-  const free = dayRows.filter((r) => !r.booking).length
+  // Each car's hires on the selected date as time slots; a car can have
+  // several hires a day as long as their times don't overlap.
+  const dayRows = sorted.map((car) => {
+    const slots = carSlotsOn(bookings, car.id, selDate)
+    return { car, slots, gaps: freeGaps(slots) }
+  })
+  const free = dayRows.filter((r) => !r.slots.length).length
 
   return (
     <div className="grid gap-6">
@@ -153,8 +158,8 @@ function Availability() {
               const d = i + 1
               const s = `${view.y}-${pad(view.m + 1)}-${pad(d)}`
               const dayBookings = bookings.filter((b) => isActive(b) && b.date === s)
-              const carBooked =
-                carFilter !== "all" && dayBookings.some((b) => b.cars.some((c) => c.carId === carFilter))
+              // Hires of the filtered car that day (it may still have free time).
+              const carHires = carFilter === "all" ? 0 : carSlotsOn(bookings, carFilter, s).length
               const dayCarIds = dayBookings.flatMap((b) => b.cars.map((c) => c.carId))
               return (
                 <button
@@ -166,10 +171,7 @@ function Availability() {
                   className={cn(
                     "relative flex aspect-[1/0.92] min-w-0 flex-col justify-between rounded-lg border bg-card p-1 text-left transition-colors outline-none hover:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:p-1.5",
                     s < today && "opacity-45",
-                    carFilter !== "all" &&
-                      (carBooked
-                        ? "border-destructive/30 bg-destructive/10"
-                        : "bg-muted"),
+                    carFilter !== "all" && (carHires ? "border-amber-500/40 bg-amber-500/10" : "bg-muted"),
                     s === selDate && "border-2 border-primary"
                   )}
                 >
@@ -193,13 +195,13 @@ function Availability() {
                       </span>
                       {cars.length > 0 && (
                         <span className="hidden text-[11px] text-muted-foreground sm:block">
-                          {cars.length - new Set(dayCarIds).size}/{cars.length} free
+                          {cars.length - new Set(dayCarIds).size}/{cars.length} no hires
                         </span>
                       )}
                     </>
                   ) : (
                     <span className="hidden text-[11px] text-muted-foreground sm:block">
-                      {carBooked ? "Booked" : "Free"}
+                      {carHires ? `${carHires} hire${carHires === 1 ? "" : "s"}` : "Free"}
                     </span>
                   )}
                 </button>
@@ -212,16 +214,15 @@ function Availability() {
                 <span className="flex items-center gap-1.5">
                   <span className="size-2 rounded-full bg-primary" /> Hire tomorrow
                 </span>
-                <span>Dots = booked cars</span>
+                <span>Dots = hires (a car can have several a day)</span>
               </>
             ) : (
               <>
                 <span className="flex items-center gap-1.5">
-                  <span className="size-2.5 rounded-sm border bg-muted" /> Available
+                  <span className="size-2.5 rounded-sm border bg-muted" /> No hires
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <span className="size-2.5 rounded-sm border border-destructive/30 bg-destructive/10" />{" "}
-                  Booked
+                  <span className="size-2.5 rounded-sm border border-amber-500/40 bg-amber-500/10" /> Has hires (check times)
                 </span>
               </>
             )}
@@ -237,8 +238,8 @@ function Availability() {
           <CardTitle className="text-lg">{fmtDate(selDate)}</CardTitle>
           {cars.length > 0 && (
             <CardAction>
-              <Badge variant={free ? "secondary" : "destructive"}>
-                {free} of {cars.length} available
+              <Badge variant="secondary">
+                {free} of {cars.length} with no hires
               </Badge>
             </CardAction>
           )}
@@ -258,44 +259,49 @@ function Availability() {
             </Empty>
           ) : (
             <ItemGroup className="gap-2">
-              {dayRows.map(({ car, booking }) => (
-                <Item key={car.id} variant="outline" size="sm">
+              {dayRows.map(({ car, slots, gaps }) => (
+                <Item key={car.id} variant="outline" size="sm" className="items-start">
                   <ItemMedia className="w-28 overflow-hidden rounded-lg">
                     <CarPhoto car={car} sizes="112px" />
                   </ItemMedia>
-                  <ItemContent className="min-w-32">
+                  <ItemContent className="min-w-40">
                     <ItemTitle>{car.name}</ItemTitle>
                     <ItemDescription className="flex items-center gap-1.5">
                       <Swatch hex={car.hex} /> {car.color} · {rs(car.rate)}
                     </ItemDescription>
-                    {booking && (
-                      <ItemDescription>
-                        {booking.customer} · {carTimes(booking, car.id)}
-                      </ItemDescription>
+                    {slots.length > 0 && (
+                      <ul className="mt-1 grid gap-1">
+                        {slots.map((x, i) => (
+                          <li key={i} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                            <span className="font-mono font-medium tabular-nums">
+                              {fmtMinutes(x.start)} – {fmtMinutes(x.end)}
+                            </span>
+                            <span className="font-mono text-xs text-muted-foreground">{x.booking.invNo}</span>
+                            <span className="text-muted-foreground">{x.booking.customer}</span>
+                            <span className="flex gap-1">
+                              <Button size="xs" variant="outline" onClick={() => setInvoice(x.booking)}>
+                                Invoice
+                              </Button>
+                              <Button size="xs" variant="outline" asChild>
+                                <Link href={`/dashboard/bookings/${x.booking.id}/edit`}>Edit</Link>
+                              </Button>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {slots.length > 0 && (
+                      <ItemDescription>Free: {gaps.map(describeGap).join(", ") || "none"}</ItemDescription>
                     )}
                   </ItemContent>
-                  <ItemActions className="ml-auto">
-                    {booking ? (
-                      <>
-                        <Badge variant="destructive">Booked</Badge>
-                        <Button size="sm" variant="outline" onClick={() => setInvoice(booking)}>
-                          Invoice
-                        </Button>
-                        <Button size="sm" variant="outline" asChild>
-                          <Link href={`/dashboard/bookings/${booking.id}/edit`}>Edit</Link>
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Badge variant="secondary">Available</Badge>
-                        {!past && (
-                          <Button size="sm" asChild>
-                            <Link href={`/dashboard/bookings/new?date=${selDate}&car=${encodeURIComponent(car.id)}`}>
-                              Book
-                            </Link>
-                          </Button>
-                        )}
-                      </>
+                  <ItemActions className="ml-auto self-center">
+                    <Badge variant={slots.length ? "outline" : "secondary"}>
+                      {slots.length ? `${slots.length} hire${slots.length === 1 ? "" : "s"}` : "Free all day"}
+                    </Badge>
+                    {!past && gaps.length > 0 && (
+                      <Button size="sm" asChild>
+                        <Link href={`/dashboard/bookings/new?date=${selDate}&car=${encodeURIComponent(car.id)}`}>Book</Link>
+                      </Button>
                     )}
                   </ItemActions>
                 </Item>

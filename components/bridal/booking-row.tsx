@@ -87,9 +87,18 @@ export function BookingRow({
             </span>
           </ItemDescription>
         ))}
+        {b.decoNotes?.trim() && (
+          <ItemDescription className="line-clamp-none whitespace-pre-line">
+            <span className="font-medium text-foreground">Decoration notes: </span>
+            {b.decoNotes.trim()}
+          </ItemDescription>
+        )}
       </ItemContent>
       <ItemActions className="ml-auto flex-wrap justify-end self-center">
-        <span className="font-semibold tabular-nums">{rs(b.total)}</span>
+        <span className="grid text-right">
+          <span className="font-semibold tabular-nums">{rs(b.total)}</span>
+          {b.discount > 0 && <span className="text-xs text-muted-foreground">after {rs(b.discount)} discount</span>}
+        </span>
         <Button size="sm" variant="outline" onClick={() => onInvoice(b)}>
           Invoice
         </Button>

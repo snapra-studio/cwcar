@@ -25,20 +25,28 @@ const image = (maxBytes: number) =>
 
 export const stopSchema = z.object({ time: optTime, loc: required(200, "a stop location") })
 
-export const bookedCarSchema = z.object({
-  carId: id,
-  carName: required(160, "the car name"),
-  rate: money,
-  fleet: z.enum(["own", "partner"]).optional(),
-  ownerName: text(80).optional(),
-  ownerCost: money.optional(),
-  driverId: id.optional(),
-  pickupTime: time,
-  pickupLoc: required(200, "the pick-up location"),
-  stops: z.array(stopSchema).max(15),
-  dropTime: time,
-  dropLoc: required(200, "the drop-off location"),
-})
+const minutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
+
+export const bookedCarSchema = z
+  .object({
+    carId: id,
+    carName: required(160, "the car name"),
+    rate: money,
+    fleet: z.enum(["own", "partner"]).optional(),
+    ownerName: text(80).optional(),
+    ownerCost: money.optional(),
+    driverId: id.optional(),
+    pickupTime: time,
+    pickupLoc: required(200, "the pick-up location"),
+    stops: z.array(stopSchema).max(15),
+    dropTime: time,
+    dropLoc: required(200, "the drop-off location"),
+  })
+  // Compared as minutes, not strings. A hire must end after it starts.
+  .refine((c) => minutes(c.dropTime) > minutes(c.pickupTime), {
+    message: "The drop-off time must be later than the pick-up time.",
+    path: ["dropTime"],
+  })
 
 export const bookingInputSchema = z.object({
   date: isoDate,
@@ -48,7 +56,9 @@ export const bookingInputSchema = z.object({
   phone: required(40, "the phone number"),
   address: text(300),
   deco: z.enum(["artificial", "fresh"]),
-  // Totals are recalculated on the server; only the advance is taken as given.
+  decoNotes: text(1000).default(""),
+  // Totals are recalculated on the server; discount and advance are taken as given.
+  discount: money.default(0),
   advance: money,
 })
 

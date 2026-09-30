@@ -5,7 +5,7 @@ import { ArrowLeftIcon, ExternalLinkIcon, FileTextIcon, FlowerIcon, PaperclipIco
 import { CarPhoto } from "@/components/bridal/car-art"
 import { RouteList, StatusBadge } from "@/components/driver/hire-card"
 import { Button } from "@/components/ui/button"
-import { fmtDate } from "@/lib/bridal/format"
+import { fmtDate, fmtTime } from "@/lib/bridal/format"
 import { hireStatus } from "@/lib/bridal/logic"
 import { driverPage } from "@/lib/server/guard"
 import { listFiles } from "@/lib/server/files"
@@ -47,6 +47,12 @@ export default async function DriverHirePage({ params }: PageProps<"/driver/hire
             {hire.deco === "fresh" ? "Fresh flowers" : "Artificial flowers"}
           </span>
         </p>
+        {hire.decoNotes?.trim() && (
+          <p className="mt-1 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm whitespace-pre-line">
+            <span className="font-semibold">Decoration notes: </span>
+            {hire.decoNotes.trim()}
+          </p>
+        )}
       </div>
 
       <section className="grid gap-2 rounded-2xl border bg-card p-4">
@@ -73,6 +79,9 @@ export default async function DriverHirePage({ params }: PageProps<"/driver/hire
             <div className="grid gap-4 px-4 pb-4">
               <div>
                 <h2 className="text-xl font-bold">{c.carName}</h2>
+                <p className="text-lg font-semibold tabular-nums">
+                  {fmtTime(c.pickupTime)} <span className="text-muted-foreground">→</span> {fmtTime(c.dropTime)}
+                </p>
                 {info?.plate && (
                   <span className="mt-1 inline-block rounded-md border bg-background px-2 py-0.5 font-mono text-sm">
                     {info.plate}

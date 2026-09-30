@@ -12,7 +12,13 @@ import * as api from "@/lib/server/admin-actions"
 // before the copy is updated.
 
 export {
-  bookingFor,
+  bookingMoney,
+  carSlotsOn,
+  clashes,
+  describeGap,
+  fmtMinutes,
+  freeGaps,
+  toMinutes,
   carNames,
   carTimes,
   hireMoney,

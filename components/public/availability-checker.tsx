@@ -26,6 +26,7 @@ import {
 import { CarPhoto } from "@/components/bridal/car-art"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MONTHS, fmtDate, pad, parseIso, toIso } from "@/lib/bridal/format"
+import { describeGap, fmtMinutes, freeGaps, overlaps, toMinutes } from "@/lib/bridal/logic"
 import type { CarStyle } from "@/lib/bridal/types"
 import { cn } from "@/lib/utils"
 
@@ -37,7 +38,10 @@ const serif = Playfair_Display({ subsets: ["latin"], weight: ["400", "500", "600
 
 type PublicCar = { id: string; name: string; color: string; hex: string; style: CarStyle; image?: string }
 type Business = { name: string; phone: string; email: string; address: string }
-type Data = { business: Business; cars: PublicCar[]; booked: Record<string, string[]> }
+// Booked time slots only ("YYYY-MM-DDTHH:MM"), no other hire details.
+type PublicSlot = { carId: string; start: string; end: string }
+type Data = { business: Business; cars: PublicCar[]; slots: PublicSlot[] }
+type DayState = "free" | "partial" | "booked"
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 const STYLE_LABEL: Record<CarStyle, string> = { sedan: "Sedan", vintage: "Vintage", suv: "SUV" }
@@ -65,6 +69,9 @@ export function AvailabilityChecker({ today }: { today: string }) {
   const [query, setQuery] = React.useState("")
   const [type, setType] = React.useState<"" | CarStyle>("")
   const [colour, setColour] = React.useState("")
+  // Optional time window to check, as "HH:MM".
+  const [fromTime, setFromTime] = React.useState("")
+  const [toTime, setToTime] = React.useState("")
   const [data, setData] = React.useState<Data | null>(null)
   const [error, setError] = React.useState("")
   const [heroOk, setHeroOk] = React.useState(true)
@@ -88,9 +95,33 @@ export function AvailabilityChecker({ today }: { today: string }) {
   }, [view])
 
   const cars = data?.cars ?? []
-  const booked = data?.booked ?? {}
+  const allSlots = data?.slots ?? []
   const business = data?.business
-  const isBooked = (id: string, day: string) => (booked[day] ?? []).includes(id)
+  // A car's booked slots on one day, in minutes and clipped to that day (a
+  // hire past midnight shows on both days).
+  const slotsOn = (id: string, day: string) =>
+    allSlots
+      .filter((x) => x.carId === id && x.start.slice(0, 10) <= day && x.end.slice(0, 10) >= day)
+      .map((x) => ({
+        start: x.start.slice(0, 10) < day ? 0 : toMinutes(x.start.slice(11, 16)),
+        end: x.end.slice(0, 10) > day ? 24 * 60 : toMinutes(x.end.slice(11, 16)),
+      }))
+      .filter((x) => x.end > x.start)
+      .sort((a, b) => a.start - b.start)
+  const winStart = toMinutes(fromTime)
+  const winEnd = toMinutes(toTime)
+  const hasWindow = !Number.isNaN(winStart) && !Number.isNaN(winEnd)
+  const windowOk = hasWindow && winEnd > winStart
+  const windowText = windowOk ? `${fmtMinutes(winStart)} – ${fmtMinutes(winEnd)}` : ""
+  // With a time window: free/booked for that window. Without: free all day,
+  // partly booked, or booked with no free time left.
+  const dayState = (id: string, day: string): DayState => {
+    const slots = slotsOn(id, day)
+    if (windowOk) return slots.some((x) => overlaps(winStart, winEnd, x.start, x.end)) ? "booked" : "free"
+    if (!slots.length) return "free"
+    return freeGaps(slots).length ? "partial" : "booked"
+  }
+  const slotText = (x: { start: number; end: number }) => `${fmtMinutes(x.start)} – ${fmtMinutes(x.end)}`
   const q = query.trim().toLowerCase()
   const colourOf = (c: PublicCar) => c.color.trim().toLowerCase()
   const shown = cars.filter(
@@ -112,8 +143,9 @@ export function AvailabilityChecker({ today }: { today: string }) {
   const atStart = view.y === todayDate.getFullYear() && view.m === todayDate.getMonth()
   // Answers need the selected date's month to be loaded.
   const dateLoaded = date.startsWith(`${view.y}-${pad(view.m + 1)}`)
-  const freeOn = (day: string) => cars.length - (booked[day]?.length ?? 0)
-  const status = selected && dateLoaded ? (isBooked(selected.id, date) ? "booked" : "free") : null
+  const freeOn = (day: string) => cars.filter((c) => dayState(c.id, day) === "free").length
+  const status: DayState | null = selected && dateLoaded ? dayState(selected.id, date) : null
+  const selSlots = selected && dateLoaded ? slotsOn(selected.id, date) : []
 
   function pickCar(id: string) {
     setCarId((cur) => (cur === id ? "" : id))
@@ -226,7 +258,13 @@ export function AvailabilityChecker({ today }: { today: string }) {
           aria-live="polite"
           className={cn(
             "grid animate-in scroll-mt-4 items-center gap-4 rounded-2xl border bg-white/85 p-5 shadow-lg shadow-[#8A5A2B]/5 backdrop-blur-md delay-100 duration-700 fade-in fill-mode-both slide-in-from-bottom-4 sm:grid-cols-[auto_1fr_auto] sm:p-6 lg:max-w-[62%]",
-            status === "booked" ? "border-destructive/30" : status === "free" ? "border-emerald-600/30" : "border-[#EDE0CD]"
+            status === "booked"
+              ? "border-destructive/30"
+              : status === "free"
+                ? "border-emerald-600/30"
+                : status === "partial"
+                  ? "border-amber-500/40"
+                  : "border-[#EDE0CD]"
           )}
         >
           <span
@@ -236,7 +274,9 @@ export function AvailabilityChecker({ today }: { today: string }) {
                 ? "bg-destructive/10 text-destructive"
                 : status === "free"
                   ? "bg-emerald-600/10 text-emerald-700"
-                  : "bg-[#F5ECDF] text-[#8A5A2B]"
+                  : status === "partial"
+                    ? "bg-amber-500/10 text-amber-700"
+                    : "bg-[#F5ECDF] text-[#8A5A2B]"
             )}
           >
             {status === "booked" ? <XIcon className="size-6" /> : status === "free" ? <CheckIcon className="size-6" /> : <CalendarDaysIcon className="size-6" />}
@@ -248,17 +288,86 @@ export function AvailabilityChecker({ today }: { today: string }) {
             </p>
             {!data ? (
               <Skeleton className="mt-1 h-7 w-64" />
-            ) : status === "booked" ? (
-              <p className="text-lg font-bold text-destructive sm:text-xl">Not available — booked on this date</p>
-            ) : status === "free" ? (
-              <p className="text-lg font-bold text-emerald-700 sm:text-xl">Available on this date!</p>
-            ) : selected ? (
+            ) : selected && !dateLoaded ? (
               <p className="text-xl font-semibold">Pick the date again on the calendar.</p>
+            ) : selected && windowOk ? (
+              status === "booked" ? (
+                <>
+                  <p className="text-lg font-bold text-destructive sm:text-xl">
+                    ✕ {selected.name} — not available {windowText}
+                  </p>
+                  <p className="text-sm text-[#7A6149]">
+                    Booked{" "}
+                    {selSlots
+                      .filter((x) => overlaps(winStart, winEnd, x.start, x.end))
+                      .map(slotText)
+                      .join(", ")}
+                  </p>
+                </>
+              ) : (
+                <p className="text-lg font-bold text-emerald-700 sm:text-xl">
+                  ✓ {selected.name} — available {windowText}
+                </p>
+              )
+            ) : selected ? (
+              selSlots.length === 0 ? (
+                <p className="text-lg font-bold text-emerald-700 sm:text-xl">✓ Free all day</p>
+              ) : (
+                <>
+                  <p className="text-base font-semibold sm:text-lg">
+                    <span className="text-destructive">Booked:</span> {selSlots.map(slotText).join(", ")}
+                  </p>
+                  <p className="text-base font-semibold sm:text-lg">
+                    <span className="text-emerald-700">Available:</span>{" "}
+                    {freeGaps(selSlots).map(describeGap).join(", ") || "no free time this day"}
+                  </p>
+                </>
+              )
             ) : (
               <p className="text-lg font-semibold sm:text-xl">
-                {dateLoaded ? `${freeOn(date)} of ${cars.length} cars available — pick a car below.` : "Pick a date and a car."}
+                {!dateLoaded
+                  ? "Pick a date and a car."
+                  : windowOk
+                    ? `${freeOn(date)} of ${cars.length} cars available ${windowText} — pick a car below.`
+                    : `${freeOn(date)} of ${cars.length} cars free all day — pick a car, or choose a time below.`}
               </p>
             )}
+            <div className="mt-3 flex flex-wrap items-end gap-2 text-sm">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-[#7A6149]">From</span>
+                <input
+                  type="time"
+                  aria-label="From time"
+                  value={fromTime}
+                  onChange={(e) => setFromTime(e.target.value)}
+                  className="h-10 rounded-full border border-[#E7D6BF] bg-white px-3 outline-none focus:ring-3 focus:ring-[#A8703E]/30"
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-[#7A6149]">To</span>
+                <input
+                  type="time"
+                  aria-label="To time"
+                  value={toTime}
+                  onChange={(e) => setToTime(e.target.value)}
+                  className="h-10 rounded-full border border-[#E7D6BF] bg-white px-3 outline-none focus:ring-3 focus:ring-[#A8703E]/30"
+                />
+              </label>
+              {(fromTime || toTime) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFromTime("")
+                    setToTime("")
+                  }}
+                  className="h-10 rounded-full px-3 text-[#8A5A2B] hover:bg-[#F5ECDF]"
+                >
+                  Clear time
+                </button>
+              )}
+              {hasWindow && !windowOk && <span className="pb-2 text-destructive">The end time must be after the start time.</span>}
+              {!hasWindow && <span className="pb-2 text-xs text-[#9C8670]">Optional: check a time on that date</span>}
+            </div>
           </div>
           {business?.phone && (
             <a
@@ -310,14 +419,14 @@ export function AvailabilityChecker({ today }: { today: string }) {
                 const day = `${view.y}-${pad(view.m + 1)}-${pad(i + 1)}`
                 const past = day < today
                 const on = day === date
-                const busy = selected ? isBooked(selected.id, day) : false
+                const state = selected ? dayState(selected.id, day) : "free"
                 return (
                   <button
                     key={day}
                     type="button"
                     disabled={past}
                     aria-pressed={on}
-                    aria-label={`${fmtDate(day)}${selected ? (busy ? ", booked" : ", available") : `, ${freeOn(day)} cars free`}`}
+                    aria-label={`${fmtDate(day)}${selected ? `, ${state === "partial" ? "partly booked" : state === "booked" ? "booked" : "available"}` : `, ${freeOn(day)} cars free`}`}
                     onClick={() => setDate(day)}
                     className={cn(
                       "flex aspect-square flex-col items-center justify-center rounded-2xl text-sm font-medium transition outline-none focus-visible:ring-3 focus-visible:ring-[#A8703E]/40 disabled:opacity-35 sm:text-base",
@@ -326,16 +435,20 @@ export function AvailabilityChecker({ today }: { today: string }) {
                         : past
                           ? "text-[#B7A48E]"
                           : selected
-                            ? busy
+                            ? state === "booked"
                               ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
-                              : "bg-emerald-600/10 text-emerald-800 hover:bg-emerald-600/15"
+                              : state === "partial"
+                                ? "bg-amber-500/15 text-amber-800 hover:bg-amber-500/20"
+                                : "bg-emerald-600/10 text-emerald-800 hover:bg-emerald-600/15"
                             : "bg-[#FAF4EC] shadow-sm hover:bg-[#F3E7D6]"
                     )}
                   >
                     {i + 1}
                     {on && data && !selected && <span className="text-[10px] font-normal opacity-85">{freeOn(day)} free</span>}
                     {on && data && selected && (
-                      <span className="text-[10px] font-normal opacity-85">{busy ? "booked" : "free"}</span>
+                      <span className="text-[10px] font-normal opacity-85">
+                        {state === "booked" ? "booked" : state === "partial" ? "partly" : "free"}
+                      </span>
                     )}
                   </button>
                 )
@@ -344,6 +457,9 @@ export function AvailabilityChecker({ today }: { today: string }) {
             <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs text-[#7A6149]">
               <span className="inline-flex items-center gap-1.5">
                 <span className="size-3 rounded bg-emerald-500" /> Available
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="size-3 rounded bg-amber-400" /> Partly booked
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <span className="size-3 rounded bg-rose-400" /> Booked
@@ -408,7 +524,8 @@ export function AvailabilityChecker({ today }: { today: string }) {
             ) : (
               <ul className="grid gap-4 sm:grid-cols-2">
                 {shown.map((c) => {
-                  const busy = dateLoaded && isBooked(c.id, date)
+                  const state = dateLoaded ? dayState(c.id, date) : "free"
+                  const carSlots = dateLoaded ? slotsOn(c.id, date) : []
                   const on = c.id === carId
                   return (
                     <li
@@ -425,10 +542,18 @@ export function AvailabilityChecker({ today }: { today: string }) {
                             <span
                               className={cn(
                                 "absolute top-3 right-3 rounded-full px-3 py-1 text-[11px] font-bold tracking-widest text-white uppercase shadow-md",
-                                busy ? "bg-rose-600" : "bg-emerald-600"
+                                state === "booked" ? "bg-rose-600" : state === "partial" ? "bg-amber-600" : "bg-emerald-600"
                               )}
                             >
-                              {busy ? "Booked" : "Available"}
+                              {state === "booked"
+                                ? windowOk
+                                  ? "Booked"
+                                  : "Fully booked"
+                                : state === "partial"
+                                  ? "Partly booked"
+                                  : windowOk
+                                    ? "Available"
+                                    : "Free all day"}
                             </span>
                           )}
                         </div>
@@ -438,6 +563,9 @@ export function AvailabilityChecker({ today }: { today: string }) {
                             <div className="text-sm text-[#7A6149] capitalize">
                               {c.color} · {STYLE_LABEL[c.style]}
                             </div>
+                            {carSlots.length > 0 && !windowOk && (
+                              <div className="text-xs text-[#9C8670]">Booked {carSlots.map(slotText).join(", ")}</div>
+                            )}
                           </div>
                           <span
                             className={cn(

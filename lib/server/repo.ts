@@ -3,7 +3,16 @@ import "server-only"
 import type { z } from "zod"
 
 import { FRESH_FLOWER_COST, pad, uid } from "@/lib/bridal/format"
-import { DEFAULT_SETTINGS, DEMO_CARS, upgradeBooking, upgradeSettings, type LegacyBooking } from "@/lib/bridal/logic"
+import {
+  bookingMoney,
+  DEFAULT_SETTINGS,
+  DEMO_CARS,
+  fmtMinutes,
+  toMinutes,
+  upgradeBooking,
+  upgradeSettings,
+  type LegacyBooking,
+} from "@/lib/bridal/logic"
 import type { BookedCar, Booking, Car, Driver, DriverStatus, LedgerEntry, Settings } from "@/lib/bridal/types"
 import { isUniqueViolation, q, tx, type Db, type Row } from "@/lib/server/db"
 import { UserError } from "@/lib/server/errors"
@@ -82,8 +91,10 @@ function toBooking(r: Row): Booking {
     phone: String(r.phone),
     address: String(r.address ?? ""),
     deco: r.deco as Booking["deco"],
+    decoNotes: String(r.deco_notes ?? ""),
     rate: Number(r.rate),
     decoCost: Number(r.deco_cost),
+    discount: Number(r.discount ?? 0),
     total: Number(r.total),
     advance: Number(r.advance),
     balance: Number(r.balance),
@@ -284,23 +295,33 @@ async function bookingChecks(db: Db, input: BookingInput, excludeId: string) {
        (SELECT COALESCE(json_agg(id), '[]') FROM cars WHERE id = ANY($1::text[])) AS cars,
        (SELECT COALESCE(json_agg(json_build_object('id', id, 'status', status)), '[]')
           FROM users WHERE role = 'driver' AND id = ANY($2::text[])) AS drivers,
-       (SELECT COALESCE(json_agg(car_name), '[]') FROM booking_cars
-          WHERE active AND hire_date = $3::date AND booking_id <> $4 AND car_id = ANY($1::text[])) AS clash,
+       -- Active slots of these cars that overlap the new slots (same rule as ex_car_slot).
+       (SELECT COALESCE(json_agg(json_build_object('car', bc.car_name, 'from', lower(bc.slot), 'to', upper(bc.slot))), '[]')
+          FROM booking_cars bc
+          JOIN jsonb_to_recordset($5::jsonb) AS r(car_id text, pickup_time text, drop_time text) ON r.car_id = bc.car_id
+          WHERE bc.active AND bc.booking_id <> $4
+            AND bc.slot && booking_slot($3::date, r.pickup_time, r.drop_time)) AS clash,
        (SELECT count(*)::int FROM bookings WHERE date_part('year', date) = date_part('year', $3::date)) AS year_count`,
-    [carIds, driverIds, input.date, excludeId]
+    [
+      carIds,
+      driverIds,
+      input.date,
+      excludeId,
+      JSON.stringify(input.cars.map((c) => ({ car_id: c.carId, pickup_time: c.pickupTime, drop_time: c.dropTime }))),
+    ]
   )
   const r = rows[0]
   return {
     existingCars: new Set(r.cars as string[]),
     drivers: new Map((r.drivers as { id: string; status: string }[]).map((d) => [d.id, d.status])),
-    clash: r.clash as string[],
+    clash: r.clash as { car: string; from: string; to: string }[],
     yearCount: Number(r.year_count),
   }
 }
 
 // Recalculates money from the cars (never trusts totals from the browser) and
 // checks every car and driver. The clash check gives a friendly message; the
-// ux_car_day index is the hard guarantee.
+// ex_car_slot constraint is the hard guarantee.
 function validate(input: BookingInput, checks: Awaited<ReturnType<typeof bookingChecks>>, existing?: Booking) {
   const seen = new Set<string>()
   for (const c of input.cars) {
@@ -315,11 +336,16 @@ function validate(input: BookingInput, checks: Awaited<ReturnType<typeof booking
       if (!status || (status !== "active" && !keptSame)) throw new UserError("Pick an active driver.")
     }
   }
-  if (checks.clash.length) throw new UserError(`Already booked on that date: ${checks.clash.join(", ")}.`)
+  if (checks.clash.length) {
+    const at = (ts: string) => fmtMinutes(toMinutes(ts.slice(11, 16)))
+    const list = checks.clash.map((c) => `${c.car} (${at(c.from)} – ${at(c.to)})`).join(", ")
+    throw new UserError(`Already booked at that time: ${list}. Pick another time or car.`)
+  }
   const rate = input.cars.reduce((n, c) => n + c.rate, 0)
   const decoCost = input.deco === "fresh" ? FRESH_FLOWER_COST * input.cars.length : 0
-  const total = rate + decoCost
-  return { rate, decoCost, total, balance: Math.max(0, total - input.advance) }
+  if (input.discount > rate + decoCost) throw new UserError("The discount can't be more than the hire amount.")
+  const m = bookingMoney({ rate, decoCost, discount: input.discount, advance: input.advance })
+  return { rate, decoCost, discount: m.discount, total: m.total, balance: m.balance }
 }
 
 // Inserts all cars of a hire in one statement.
@@ -359,8 +385,9 @@ async function guardDoubleBooking<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn()
   } catch (err) {
-    if (isUniqueViolation(err, "ux_car_day")) {
-      throw new UserError("One of these cars was just booked for that date. Pick another car.")
+    // ex_car_slot: another save took an overlapping slot first.
+    if (typeof err === "object" && err && (err as { code?: string }).code === "23P01") {
+      throw new UserError("One of these cars was just booked for an overlapping time. Pick another time or car.")
     }
     throw err
   }
@@ -386,8 +413,8 @@ export async function createBooking(input: BookingInput): Promise<Booking> {
           const invNo = invNoFor(input.date, checks.yearCount + 1 + attempt, id)
           await db.query(
             `INSERT INTO bookings (id, inv_no, created_at, revision, status, date, type, customer, phone, address, deco,
-               rate, deco_cost, total, advance, balance)
-             VALUES ($1, $2, $3, 1, 'confirmed', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+               rate, deco_cost, total, advance, balance, discount, deco_notes)
+             VALUES ($1, $2, $3, 1, 'confirmed', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
             [
               id,
               invNo,
@@ -403,6 +430,8 @@ export async function createBooking(input: BookingInput): Promise<Booking> {
               money.total,
               input.advance,
               money.balance,
+              money.discount,
+              input.decoNotes,
             ]
           )
           await insertBookingCars(db, id, input.date, true, input.cars)
@@ -419,6 +448,7 @@ export async function createBooking(input: BookingInput): Promise<Booking> {
             phone: input.phone,
             address: input.address,
             deco: input.deco,
+            decoNotes: input.decoNotes,
             ...money,
             advance: input.advance,
           } satisfies Booking
@@ -446,7 +476,8 @@ export async function updateBooking(id: string, input: BookingInput): Promise<Bo
       await db.query(
         `WITH u AS (
            UPDATE bookings SET updated_at = $2, revision = revision + 1, date = $3, type = $4, customer = $5, phone = $6,
-             address = $7, deco = $8, rate = $9, deco_cost = $10, total = $11, advance = $12, balance = $13
+             address = $7, deco = $8, rate = $9, deco_cost = $10, total = $11, advance = $12, balance = $13,
+             discount = $14, deco_notes = $15
            WHERE id = $1
          )
          DELETE FROM booking_cars WHERE booking_id = $1`,
@@ -464,6 +495,8 @@ export async function updateBooking(id: string, input: BookingInput): Promise<Bo
           money.total,
           input.advance,
           money.balance,
+          money.discount,
+          input.decoNotes,
         ]
       )
       await insertBookingCars(db, id, input.date, true, input.cars)
@@ -478,6 +511,7 @@ export async function updateBooking(id: string, input: BookingInput): Promise<Bo
         phone: input.phone,
         address: input.address,
         deco: input.deco,
+        decoNotes: input.decoNotes,
         ...money,
         advance: input.advance,
       }
@@ -638,15 +672,19 @@ export async function getPublicCars(): Promise<PublicCar[]> {
   }))
 }
 
-// date -> ids of cars with an active hire that day, for from..to inclusive.
-export async function getBookedCarIds(from: string, to: string): Promise<Record<string, string[]>> {
+// Booked time slots (car + start/end only) overlapping the days from..to
+// inclusive, for the public availability page. Nothing else about the hire.
+export type PublicSlot = { carId: string; start: string; end: string }
+
+export async function getBookedSlots(from: string, to: string): Promise<PublicSlot[]> {
   const rows = await q(
-    "SELECT DISTINCT hire_date, car_id FROM booking_cars WHERE active AND hire_date BETWEEN $1 AND $2 ORDER BY hire_date",
+    `SELECT car_id, to_char(lower(slot), 'YYYY-MM-DD"T"HH24:MI') AS start, to_char(upper(slot), 'YYYY-MM-DD"T"HH24:MI') AS "end"
+     FROM booking_cars
+     WHERE active AND slot && tsrange($1::date, $2::date + 1)
+     ORDER BY lower(slot)`,
     [from, to]
   )
-  const out: Record<string, string[]> = {}
-  for (const r of rows) (out[String(r.hire_date)] ??= []).push(String(r.car_id))
-  return out
+  return rows.map((r) => ({ carId: String(r.car_id), start: String(r.start), end: String(r.end) }))
 }
 
 // ---- First run ----------------------------------------------------------------

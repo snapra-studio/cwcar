@@ -1,17 +1,22 @@
 import { CalendarClockIcon, CalendarDaysIcon } from "lucide-react"
 
 import { HireCard } from "@/components/driver/hire-card"
-import { hireStatus, startTime } from "@/lib/bridal/logic"
+import { hireStatus, toMinutes } from "@/lib/bridal/logic"
 import { driverPage } from "@/lib/server/guard"
 import { getCarInfo, getDriverHires } from "@/lib/server/repo"
 import { todayInBusinessTz } from "@/lib/server/today"
+
+// Earliest start among this driver's cars on a hire, in minutes.
+const myStart = (h: { myCars: { pickupTime: string }[] }) =>
+  Math.min(...h.myCars.map((c) => toMinutes(c.pickupTime)).filter((m) => !Number.isNaN(m)), 24 * 60)
 
 // Only hires this driver is assigned to (repo filters by driver id).
 export default async function DriverDashboard() {
   const driver = await driverPage()
   const today = todayInBusinessTz()
   const hires = (await getDriverHires(driver.id, today)).sort((a, b) =>
-    (a.date + startTime(a)).localeCompare(b.date + startTime(b))
+    // By date, then by this driver's own start time (as minutes, not text).
+    a.date.localeCompare(b.date) || myStart(a) - myStart(b)
   )
   const cars = await getCarInfo([...new Set(hires.flatMap((h) => h.myCars.map((c) => c.carId)))])
   const todays = hires.filter((h) => h.date === today)

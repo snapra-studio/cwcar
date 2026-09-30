@@ -98,9 +98,11 @@ export function HireCard({
                 <CarPhoto car={info ?? { name: c.carName, hex: "#999999", style: "sedan" }} sizes="112px" />
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 text-2xl font-bold tabular-nums">
+                <div className="flex flex-wrap items-center gap-1.5 text-xl font-bold tabular-nums">
                   <ClockIcon className="size-5 text-primary" />
-                  {fmtTime(c.pickupTime)}
+                  <span>
+                    {fmtTime(c.pickupTime)} <span className="text-muted-foreground">→</span> {fmtTime(c.dropTime)}
+                  </span>
                 </div>
                 <div className="font-semibold">{c.carName}</div>
                 {info?.plate && (

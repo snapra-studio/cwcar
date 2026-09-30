@@ -98,12 +98,18 @@ export type Booking = {
   phone: string
   address: string
   deco: Decoration
+  // Customer's extra decoration requests ("white and pink flowers…").
+  decoNotes: string
   // Sum of every car's hire amount.
   rate: number
   // Fresh flowers for every car on the booking.
   decoCost: number
+  // Discount in LKR taken off the subtotal (rate + decoCost).
+  discount: number
+  // Final total after the discount: rate + decoCost - discount.
   total: number
   advance: number
+  // total - advance (never below 0).
   balance: number
 }
 

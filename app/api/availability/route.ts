@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server"
 
-import { getBookedCarIds, getPublicCars, getSettings } from "@/lib/server/repo"
+import { getBookedSlots, getPublicCars, getSettings } from "@/lib/server/repo"
 
 // Public, no login. Returns only what a customer needs to see whether a car
-// is free: car name/colour/type/photo and which cars are booked on which
-// days, plus the public business contact details. No customer,
+// is free: car name/colour/type/photo, the booked time slots (car + start/end
+// only), plus the public business contact details. No customer,
 // price, route, driver, invoice or plate details.
 //   GET /api/availability?from=2027-05-01&to=2027-05-31
 const ISO = /^\d{4}-\d{2}-\d{2}$/
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   if ((Date.parse(to) - Date.parse(from)) / 86_400_000 > 95) {
     return NextResponse.json({ error: "Ask for 3 months or less at a time." }, { status: 400 })
   }
-  const [settings, cars, booked] = await Promise.all([getSettings(), getPublicCars(), getBookedCarIds(from, to)])
+  const [settings, cars, slots] = await Promise.all([getSettings(), getPublicCars(), getBookedSlots(from, to)])
   return NextResponse.json(
     {
       // Public contact details only (same as printed on invoices).
@@ -31,7 +31,8 @@ export async function GET(request: Request) {
         address: bizAddr,
       }))(settings),
       cars,
-      booked,
+      // [{ carId, start, end }] as "YYYY-MM-DDTHH:MM"; nothing else about the hire.
+      slots,
     },
     { headers: { "Cache-Control": "no-store" } }
   )

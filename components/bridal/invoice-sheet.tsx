@@ -2,6 +2,7 @@ import * as React from "react"
 import Image from "next/image"
 
 import { fmtTime, MONTHS, parseIso } from "@/lib/bridal/format"
+import { bookingMoney } from "@/lib/bridal/logic"
 import {
   invoiceDisplay,
   invoiceFontVars,
@@ -18,14 +19,17 @@ export const SHEET_H = 1123
 const INK = "#6B4520"
 const HEAD = "#C48C5A"
 const LINE = "#C9A27E"
-// Minimum height of the bordered line-items box (excluding the Total Due row);
+// Minimum height of the bordered line-items box (excluding the Balance Due row);
 // it grows when an order has several cars.
 const MIN_BODY_H = 200
-const SUMMARY_H = 76
+const SUMMARY_ROW_H = 24
 
-function bodyHeight(items: Line[]) {
+// Height of the totals block inside the box: one row per total, plus padding.
+const summaryHeight = (rows: number) => rows * SUMMARY_ROW_H + 4
+
+function bodyHeight(items: Line[], summaryRows: number) {
   const lines = items.reduce((n, it) => n + (it.sub ? 2 : 1), 0)
-  return Math.max(MIN_BODY_H, 12 + lines * 17 + (items.length - 1) * 19 + 12 + SUMMARY_H)
+  return Math.max(MIN_BODY_H, 12 + lines * 17 + (items.length - 1) * 19 + 12 + summaryHeight(summaryRows))
 }
 
 const num = (n: number) => Number(n || 0).toLocaleString("en-LK", { maximumFractionDigits: 0 })
@@ -119,7 +123,9 @@ const NOTES = [
   "Booking is confirmed only after advance payment of 50%.",
   "Balance payment due before the event date.",
   "Please contact us immediately if there are any changes to the booking.",
-  "Any additional hours or kilometers beyond the agreed limit will be charged separately.",
+  "Vehicles will be reserved for the above-mentioned time period. If the time exceeds, an additional charge of LKR 3,500 will be charged per hour based on the vehicle's availability (even the first 5 minutes will be charged for the whole hour).",
+  "Vehicles will not be kept on start when stationary for more than 15 minutes.",
+  "Deviation of the pre-agreed route will cause additional charges (LKR 400 per kilometer).",
 ]
 
 export function InvoiceSheet({
@@ -132,8 +138,17 @@ export function InvoiceSheet({
   ref?: React.Ref<HTMLDivElement>
 }) {
   const items = lineItems(b)
+  // Subtotal - discount = total; total - advance = balance due (bookingMoney).
+  const money = bookingMoney({ rate: b.rate, decoCost: b.decoCost, discount: b.discount, advance: b.advance })
+  const summary: [string, string][] = [
+    ["Subtotal / Hire Amount", num(money.subtotal)],
+    ...(money.discount > 0 ? ([["Discount", `(${num(money.discount)})`]] as [string, string][]) : []),
+    ["Total", num(money.total)],
+    ["Advance Paid", b.advance ? `(${num(b.advance)})` : "0"],
+  ]
+  const SUMMARY_H = summaryHeight(summary.length)
   const rev = b.revision ?? 1
-  const BODY_H = bodyHeight(items)
+  const BODY_H = bodyHeight(items, summary.length)
   const cols = "220px 174px 90px 28px 170px"
   const routes = b.cars.map((c) => ({
     name: c.carName,
@@ -261,13 +276,7 @@ export function InvoiceSheet({
           </div>
 
           <div className="absolute inset-x-0 leading-[24px]" style={{ top: BODY_H - SUMMARY_H }}>
-            {(
-              [
-                ["Subtotal", num(b.total)],
-                ["Discount", ""],
-                ["Advance", b.advance ? `(${num(b.advance)})` : ""],
-              ] as const
-            ).map(([k, v]) => (
+            {summary.map(([k, v]) => (
               <div key={k} className="flex">
                 <div className="text-right font-bold" style={{ width: 470 }}>{k}</div>
                 <div className="text-right" style={{ marginLeft: 42, width: 170, paddingRight: 54 }}>{v}</div>
@@ -276,7 +285,7 @@ export function InvoiceSheet({
           </div>
 
           <div className="absolute inset-x-0 flex items-center" style={{ top: BODY_H, height: 45 }}>
-            <div className="text-right font-bold" style={{ width: 470 }}>Total Due</div>
+            <div className="text-right font-bold" style={{ width: 470 }}>Balance Due</div>
             <div
               className="flex h-full items-center justify-end font-bold text-white"
               style={{ marginLeft: 42, width: 170, paddingRight: 54, background: HEAD }}
@@ -310,12 +319,18 @@ export function InvoiceSheet({
             </div>
           ))}
         </div>
+        {b.decoNotes?.trim() && (
+          <div className="mt-2 text-[12.5px] leading-[18px]">
+            <span className="font-bold">Decoration Notes: </span>
+            <span className="break-words whitespace-pre-line">{b.decoNotes.trim()}</span>
+          </div>
+        )}
       </div>
 
       {/* Notes */}
       <div style={{ marginTop: 12, marginLeft: 68 }}>
         <div>Notes</div>
-        <ul className="mt-1 list-disc text-[11.5px] leading-[16.5px]" style={{ paddingLeft: 60 }}>
+        <ul className="mt-1 list-disc text-[11px] leading-[15px]" style={{ paddingLeft: 60, paddingRight: 56 }}>
           {NOTES.map((n) => (
             <li key={n}>{n}</li>
           ))}

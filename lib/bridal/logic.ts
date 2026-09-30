@@ -1,7 +1,7 @@
 // Pure booking rules shared by the browser (admin screens) and the server
 // (database, driver pages, public availability). No React, no storage.
 
-import { fmtTime } from "@/lib/bridal/format"
+import { addDays, fmtTime } from "@/lib/bridal/format"
 import type { BookedCar, Booking, Car, LedgerEntry, Route, Settings } from "@/lib/bridal/types"
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,13 +25,96 @@ export const DEMO_CARS: Car[] = [
 
 export const isActive = (b: Booking) => b.status !== "cancelled"
 
-// The active booking that already has `carId` on `date`. One car can do one
-// hire per day, so any active booking that day blocks it. `excludeId` is the
-// booking being edited, so its own cars don't count as taken.
-export const bookingFor = (bookings: Booking[], carId: string, date: string, excludeId?: string) =>
-  bookings.find(
-    (b) => b.id !== excludeId && isActive(b) && b.date === date && b.cars.some((c) => c.carId === carId)
-  )
+// ---- Time-based availability ------------------------------------------------
+// A car is blocked only for each hire's own time slot (pick-up to drop-off),
+// so it can do several hires a day. The server enforces the same rule
+// (lib/server/repo.ts + the ex_car_slot constraint); this copy drives the UI.
+
+const DAY = 24 * 60
+
+// "08:30" -> 510 minutes after midnight; NaN if not a valid HH:MM time.
+export function toMinutes(t: string) {
+  const m = /^([01][0-9]|2[0-3]):([0-5][0-9])$/.exec(t)
+  return m ? Number(m[1]) * 60 + Number(m[2]) : Number.NaN
+}
+
+// [start, end) in minutes; touching slots (8-10, 10-13) don't overlap.
+export const overlaps = (aStart: number, aEnd: number, bStart: number, bEnd: number) => aStart < bEnd && aEnd > bStart
+
+// A car's slot on its hire date in minutes. Older hires whose drop-off is
+// earlier than pick-up ran past midnight, so their end is > 24:00; a missing
+// time blocks the rest of the day. Mirrors booking_slot() in the database.
+export function carSlot(c: { pickupTime: string; dropTime: string }) {
+  const s = toMinutes(c.pickupTime)
+  const e = toMinutes(c.dropTime)
+  if (Number.isNaN(s)) return { start: 0, end: DAY }
+  if (Number.isNaN(e)) return { start: s, end: DAY }
+  return { start: s, end: e > s ? e : e + DAY }
+}
+
+export type Slot = { start: number; end: number; booking: Booking }
+
+// Active slots of `carId` that fall on `date` (clipped to that day), including
+// an overnight hire from the day before. `excludeId` is the booking being
+// edited, so its own slot doesn't count.
+export function carSlotsOn(bookings: Booking[], carId: string, date: string, excludeId?: string): Slot[] {
+  const prev = addDays(date, -1)
+  const out: Slot[] = []
+  for (const b of bookings) {
+    if (b.id === excludeId || !isActive(b) || (b.date !== date && b.date !== prev)) continue
+    for (const c of b.cars) {
+      if (c.carId !== carId) continue
+      const { start, end } = carSlot(c)
+      if (b.date === date) out.push({ start, end: Math.min(end, DAY), booking: b })
+      else if (end > DAY) out.push({ start: 0, end: end - DAY, booking: b })
+    }
+  }
+  return out.sort((a, b) => a.start - b.start)
+}
+
+// Existing slots that clash with a new start-end (minutes) on that date.
+export const clashes = (bookings: Booking[], carId: string, date: string, start: number, end: number, excludeId?: string) =>
+  carSlotsOn(bookings, carId, date, excludeId).filter((s) => overlaps(start, end, s.start, s.end))
+
+// Free periods between booked slots on one day, as [start, end) minutes.
+export function freeGaps(slots: { start: number; end: number }[]) {
+  const gaps: { start: number; end: number }[] = []
+  let at = 0
+  for (const s of slots.slice().sort((a, b) => a.start - b.start)) {
+    if (s.start > at) gaps.push({ start: at, end: s.start })
+    at = Math.max(at, s.end)
+  }
+  if (at < DAY) gaps.push({ start: at, end: DAY })
+  return gaps
+}
+
+// 510 -> "8:30 AM"; 1440 -> "midnight".
+export function fmtMinutes(m: number) {
+  if (m >= DAY) return "midnight"
+  const h = Math.floor(m / 60)
+  const min = m % 60
+  return `${h % 12 || 12}:${String(min).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`
+}
+
+// "Before 8:00 AM", "10:00 AM – 4:00 PM", "After 8:00 PM", "All day".
+export function describeGap(g: { start: number; end: number }) {
+  if (g.start === 0 && g.end >= DAY) return "All day"
+  if (g.start === 0) return `Before ${fmtMinutes(g.end)}`
+  if (g.end >= DAY) return `After ${fmtMinutes(g.start)}`
+  return `${fmtMinutes(g.start)} – ${fmtMinutes(g.end)}`
+}
+
+// ---- Money ----------------------------------------------------------------------
+
+// The one place the booking maths lives (form, server, invoice):
+//   subtotal = car hire + decoration; total = subtotal - discount;
+//   balance  = total - advance (never below 0).
+export function bookingMoney(i: { rate: number; decoCost: number; discount?: number; advance: number }) {
+  const subtotal = i.rate + i.decoCost
+  const discount = Math.min(Math.max(0, i.discount ?? 0), subtotal)
+  const total = subtotal - discount
+  return { subtotal, discount, total, balance: Math.max(0, total - i.advance) }
+}
 
 export const carNames = (b: Booking) => b.cars.map((c) => c.carName).join(", ")
 
