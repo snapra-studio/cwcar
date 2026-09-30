@@ -34,8 +34,9 @@ export async function putObject(key: string, body: Uint8Array, contentType: stri
 }
 
 // The object's bytes as a web stream, for sending on to the browser.
-export async function getObject(key: string) {
-  const res = await client().send(new GetObjectCommand({ Bucket: bucket(), Key: key }))
+// `range` ("bytes=0-1023") reads only part of it, for video streaming.
+export async function getObject(key: string, range?: string) {
+  const res = await client().send(new GetObjectCommand({ Bucket: bucket(), Key: key, Range: range }))
   if (!res.Body) throw new Error("Empty object")
   return res.Body.transformToWebStream()
 }

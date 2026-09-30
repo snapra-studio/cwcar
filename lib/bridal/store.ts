@@ -227,6 +227,52 @@ export async function saveSettings(settings: Settings) {
   patch(() => ({ settings: next }))
 }
 
+// Uploads (or, with null, removes) the public page background video.
+export async function setCoverVideo(file: File | null) {
+  let r: Response
+  if (file) {
+    const form = new FormData()
+    form.append("file", file)
+    r = await fetch("/api/admin/cover-video", { method: "POST", body: form })
+  } else {
+    r = await fetch("/api/admin/cover-video", { method: "DELETE" })
+  }
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? "Could not save the video. Try again.")
+  patch(() => ({ settings: body.settings }))
+  return body.settings as Settings
+}
+
+export type FacebookStatus = {
+  configured: boolean
+  lastAttemptAt?: string
+  lastSuccessAt?: string
+  lastError?: string
+  videoId?: string
+  permalink?: string
+  postedAt?: string
+}
+
+export async function getFacebookStatus(): Promise<FacebookStatus> {
+  const r = await fetch("/api/admin/facebook-sync", { cache: "no-store" })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? "Could not check Facebook.")
+  return body.status
+}
+
+// Fetches the newest reel from the Facebook page now and makes it the public
+// page background (switching back from an uploaded video).
+export async function syncFacebookReel() {
+  const r = await fetch("/api/admin/facebook-sync", { method: "POST" })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? "Could not reach Facebook.")
+  patch(() => ({ settings: body.settings }))
+  return body as {
+    result: { status: "updated" | "unchanged" | "skipped" | "error"; reason?: string; error?: string }
+    status: FacebookStatus
+  }
+}
+
 export async function setCoverImage(image: string | undefined) {
   const next = await call(api.setCoverImageAction(image ?? null))
   patch(() => ({ settings: next }))

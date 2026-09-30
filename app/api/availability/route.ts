@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server"
+import { after, NextResponse } from "next/server"
 
+import { syncFacebookReelIfDue } from "@/lib/server/facebook"
 import { getBookedSlots, getPublicCars, getSettings } from "@/lib/server/repo"
 
 // Public, no login. Returns only what a customer needs to see whether a car
@@ -20,6 +21,8 @@ export async function GET(request: Request) {
   if ((Date.parse(to) - Date.parse(from)) / 86_400_000 > 95) {
     return NextResponse.json({ error: "Ask for 3 months or less at a time." }, { status: 400 })
   }
+  // After answering, check Facebook for a newer reel (at most every 30 min).
+  after(() => syncFacebookReelIfDue().catch((err) => console.error("Facebook sync:", err)))
   const [settings, cars, slots] = await Promise.all([getSettings(), getPublicCars(), getBookedSlots(from, to)])
   return NextResponse.json(
     {
@@ -31,6 +34,8 @@ export async function GET(request: Request) {
         address: bizAddr,
       }))(settings),
       cars,
+      // Background video for the page (a public /api/files URL), if uploaded.
+      video: settings.coverVideo?.startsWith("/api/files/") ? settings.coverVideo : undefined,
       // [{ carId, start, end }] as "YYYY-MM-DDTHH:MM"; nothing else about the hire.
       slots,
     },

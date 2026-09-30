@@ -2,7 +2,7 @@ import "server-only"
 
 import { randomBytes } from "node:crypto"
 
-import { MAX_UPLOAD_BYTES, type DocOwner, type FileMeta } from "@/lib/bridal/types"
+import { MAX_UPLOAD_BYTES, MAX_VIDEO_BYTES, type DocOwner, type FileMeta } from "@/lib/bridal/types"
 import { q, type Row } from "@/lib/server/db"
 import { UserError } from "@/lib/server/errors"
 import { deleteObjects, putObject } from "@/lib/server/storage"
@@ -30,6 +30,9 @@ const SIGNATURES: { type: string; ext: string; test: (b: Uint8Array) => boolean 
     test: (b) => ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 12) === "WEBP",
   },
   { type: "application/pdf", ext: "pdf", test: (b) => ascii(b, 0, 5) === "%PDF-" },
+  // Videos (only accepted as the public page's background video).
+  { type: "video/mp4", ext: "mp4", test: (b) => ascii(b, 4, 8) === "ftyp" && !/^(heic|heix|avif|mif1)/.test(ascii(b, 8, 12)) },
+  { type: "video/webm", ext: "webm", test: (b) => b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3 },
   // Word/Excel: new formats are zip files, old ones OLE compound files.
   { type: "application/zip", ext: "zip", test: (b) => b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04 },
   { type: "application/x-ole-storage", ext: "ole", test: (b) => b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0 },
@@ -48,7 +51,7 @@ const OFFICE: Record<string, { container: string; type: string }> = {
 function detectType(bytes: Uint8Array, fileName: string) {
   const sig = SIGNATURES.find((s) => s.test(bytes))
   if (!sig) return null
-  if (sig.type.startsWith("image/") || sig.type === "application/pdf") return sig.type
+  if (sig.type.startsWith("image/") || sig.type.startsWith("video/") || sig.type === "application/pdf") return sig.type
   const ext = fileName.toLowerCase().split(".").pop() ?? ""
   const office = OFFICE[ext]
   return office && office.container === sig.type ? office.type : null
@@ -88,11 +91,18 @@ export async function saveFile(input: {
   docType?: string
   expiresOn?: string
 }): Promise<FileMeta> {
+  const video = input.ownerType === "cover_video"
   if (!input.bytes.length) throw new UserError("That file is empty.")
-  if (input.bytes.length > MAX_UPLOAD_BYTES) throw new UserError("Files can be up to 15 MB.")
+  if (input.bytes.length > (video ? MAX_VIDEO_BYTES : MAX_UPLOAD_BYTES)) {
+    throw new UserError(video ? "Videos can be up to 40 MB. Export a shorter or smaller clip." : "Files can be up to 15 MB.")
+  }
   const fileName = safeFileName(input.fileName)
   const contentType = detectType(input.bytes, fileName)
-  if (!contentType) throw new UserError("Upload a photo (JPG, PNG, WebP), a PDF, or a Word/Excel file.")
+  if (video) {
+    if (!contentType?.startsWith("video/")) throw new UserError("Upload an MP4 or WebM video.")
+  } else if (!contentType || contentType.startsWith("video/")) {
+    throw new UserError("Upload a photo (JPG, PNG, WebP), a PDF, or a Word/Excel file.")
+  }
   if ((input.ownerType === "car_image" || input.ownerType === "cover") && !contentType.startsWith("image/")) {
     throw new UserError("That isn't a photo.")
   }
@@ -167,7 +177,7 @@ export const deleteFilesOf = (ownerType: FileOwnerType, ownerIds: string[]) =>
 // Removes the stored photo behind a /api/files/<id> URL (when replaced).
 export async function deletePhotoUrl(url: string | undefined) {
   const id = fileIdFromUrl(url)
-  if (id) await removeRows("id = $1 AND owner_type IN ('car_image', 'cover')", [id])
+  if (id) await removeRows("id = $1 AND owner_type IN ('car_image', 'cover', 'cover_video')", [id])
 }
 
 // Does the thing a document is being attached to exist?

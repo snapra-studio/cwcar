@@ -69,6 +69,33 @@ checks access before streaming the file:
 
 Uploads are checked by content (photo, PDF, Word, Excel), up to 15 MB.
 
+## Facebook reels as the public page video
+
+The film at the top of `/availability` can play the newest reel from the
+Facebook page automatically (`lib/server/facebook.ts`). The site copies the
+reel into file storage, so it keeps playing even if Facebook is unreachable.
+
+1. At https://developers.facebook.com create an app (type **Business**) and
+   add your Facebook account as an admin of the app.
+2. In **Graph API Explorer**, pick the app, add the permissions
+   `pages_show_list` and `pages_read_engagement`, generate a *User* token,
+   and approve access to the Chrish Wedding Cars & Rentals page.
+3. Exchange it for a long-lived user token (Access Token Debugger →
+   *Extend Access Token*), then call `GET /me/accounts` with it. The
+   `access_token` next to the page is a Page token that doesn't expire.
+4. Add to `.env.local` and restart the server:
+
+   ```
+   FB_PAGE_ID=61579116013524
+   FB_PAGE_TOKEN=<the page access_token>
+   ```
+
+Then Home shows the reel status and **Sync now**. Public page visits check for
+a newer reel at most every 30 minutes. To also check while nobody visits, set
+`CRON_SECRET` and call `GET /api/cron/facebook-sync` with
+`Authorization: Bearer <CRON_SECRET>` on a schedule. Uploading a video on
+Home overrides the reels until **Use Facebook reels** is pressed.
+
 ## Moving data from the old SQLite file
 
 Earlier versions kept data in `data/cwcar.db`. To copy it into an empty

@@ -154,19 +154,20 @@ export async function getSettings(): Promise<Settings> {
 
 // Business details for invoices, without the landing-page photo.
 export async function getInvoiceSettings(): Promise<Settings> {
-  const { coverImage: _cover, ...rest } = await getSettings()
+  const { coverImage: _cover, coverVideo: _video, ...rest } = await getSettings()
   void _cover
+  void _video
   return rest
 }
 
 // Merges into the stored JSON in one statement (the landing photo is kept
 // unless a new one is given).
-async function mergeSettings(patch: Partial<Settings>, removeCover = false): Promise<Settings> {
+async function mergeSettings(patch: Partial<Settings>, remove: (keyof Settings)[] = []): Promise<Settings> {
   const [row] = await q(
     `INSERT INTO kv (key, value) VALUES ('settings', $1)
      ON CONFLICT (key) DO UPDATE SET value = ((kv.value::jsonb || excluded.value::jsonb) - $2::text[])::text
      RETURNING value`,
-    [JSON.stringify(patch), removeCover ? ["coverImage"] : []]
+    [JSON.stringify(patch), remove]
   )
   return { ...DEFAULT_SETTINGS, ...JSON.parse(String(row.value)) }
 }
@@ -181,7 +182,18 @@ export const saveSettings = ({ coverImage: _cover, ...details }: z.infer<typeof 
 export async function setCoverImage(image: string | undefined) {
   const old = (await getSettings()).coverImage
   const url = await resolvePhoto(image, "cover", "settings")
-  const next = url ? await mergeSettings({ coverImage: url }) : await mergeSettings({}, true)
+  const next = url ? await mergeSettings({ coverImage: url }) : await mergeSettings({}, ["coverImage"])
+  if (old && old !== url) await deletePhotoUrl(old)
+  return next
+}
+
+// Sets (a newly stored video's URL) or clears the public page's background
+// video, and removes the previous file.
+export async function setCoverVideo(url: string | undefined, from: "upload" | "facebook" = "upload") {
+  const old = (await getSettings()).coverVideo
+  const next = url
+    ? await mergeSettings({ coverVideo: url, coverVideoFrom: from })
+    : await mergeSettings({ coverVideoFrom: "none" }, ["coverVideo"])
   if (old && old !== url) await deletePhotoUrl(old)
   return next
 }

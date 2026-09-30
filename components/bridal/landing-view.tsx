@@ -3,7 +3,7 @@
 import * as React from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { ArrowRightIcon, CalendarClockIcon, ImagePlusIcon, SparklesIcon, Trash2Icon } from "lucide-react"
+import { ArrowRightIcon, CalendarClockIcon, ImagePlusIcon, RefreshCwIcon, SparklesIcon, Trash2Icon, VideoIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { NAV_ITEMS } from "@/components/top-nav"
@@ -12,7 +12,21 @@ import { InvoiceDialog } from "@/components/bridal/invoice-dialog"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { addDays, fmtDate, fmtTime, rs, todayIso } from "@/lib/bridal/format"
-import { blocksOn, carNames, carSlotsOn, isActive, setCoverImage, sortCars, startTime, useBridal } from "@/lib/bridal/store"
+import {
+  blocksOn,
+  carNames,
+  carSlotsOn,
+  isActive,
+  setCoverImage,
+  setCoverVideo,
+  getFacebookStatus,
+  syncFacebookReel,
+  sortCars,
+  type FacebookStatus,
+  startTime,
+  useBridal,
+} from "@/lib/bridal/store"
+import { MAX_VIDEO_BYTES } from "@/lib/bridal/types"
 import type { Booking } from "@/lib/bridal/types"
 import { cn } from "@/lib/utils"
 
@@ -160,8 +174,10 @@ function Landing() {
         <UpcomingPanel upcoming={upcoming} onInvoice={setInvoice} />
       </div>
 
-      {/* Background photo controls */}
-      <div className="absolute right-4 bottom-4 flex gap-1.5 lg:right-8 lg:bottom-8">
+      {/* Background photo controls, and the public page video */}
+      <div className="absolute right-4 bottom-4 flex flex-wrap justify-end gap-1.5 lg:right-8 lg:bottom-8">
+        <FacebookReelControl from={settings.coverVideoFrom} />
+        <CoverVideoControl hasVideo={!!settings.coverVideo} />
         <PhotoPicker
           size="sm"
           variant="outline"
@@ -263,5 +279,116 @@ function UpcomingPanel({ upcoming, onInvoice }: { upcoming: Booking[]; onInvoice
         </Button>
       )}
     </aside>
+  )
+}
+
+const CONTROL = "rounded-full border-white/30 bg-black/35 text-white backdrop-blur-md hover:bg-black/50 hover:text-white"
+
+// Uploads the video that plays behind the public availability page (e.g. the
+// decorated car driving slowly). MP4 (H.264) plays in every browser.
+function CoverVideoControl({ hasVideo }: { hasVideo: boolean }) {
+  const inputRef = React.useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = React.useState(false)
+
+  async function save(file: File | null) {
+    if (file && file.size > MAX_VIDEO_BYTES) {
+      toast.error("Videos can be up to 40 MB. Export a shorter or smaller clip (1080p, 10–20 seconds).")
+      return
+    }
+    setBusy(true)
+    try {
+      await setCoverVideo(file)
+      toast.success(file ? "Public page video updated" : "Public page video removed")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save the video. Try again.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="video/mp4,video/webm,video/quicktime"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0] ?? null
+          e.target.value = ""
+          if (file) void save(file)
+        }}
+      />
+      <Button size="sm" variant="outline" className={CONTROL} disabled={busy} onClick={() => inputRef.current?.click()}>
+        <VideoIcon data-icon="inline-start" />
+        {busy ? "Uploading video…" : hasVideo ? "Change public page video" : "Add public page video"}
+      </Button>
+      {hasVideo && !busy && (
+        <Button size="icon-sm" variant="outline" className={CONTROL} aria-label="Remove public page video" onClick={() => save(null)}>
+          <Trash2Icon />
+        </Button>
+      )}
+    </>
+  )
+}
+
+const ago = (iso?: string) => {
+  if (!iso) return ""
+  const min = Math.round((Date.now() - Date.parse(iso)) / 60000)
+  return min < 1 ? "just now" : min < 60 ? `${min} min ago` : min < 48 * 60 ? `${Math.round(min / 60)} h ago` : `${Math.round(min / 1440)} days ago`
+}
+
+// The newest reel on the Facebook page as the public page background: shows
+// the sync status and a "Sync now" button (see lib/server/facebook.ts).
+function FacebookReelControl({ from }: { from?: string }) {
+  const [status, setStatus] = React.useState<FacebookStatus | null>(null)
+  const [busy, setBusy] = React.useState(false)
+  React.useEffect(() => {
+    getFacebookStatus().then(setStatus, () => setStatus(null))
+  }, [])
+  if (!status) return null
+
+  if (!status.configured) {
+    return (
+      <span className={cn(CONTROL, "inline-flex h-8 items-center border px-3 text-xs")} title="Add FB_PAGE_ID and FB_PAGE_TOKEN to .env.local (see README)">
+        Facebook reels: not connected
+      </span>
+    )
+  }
+
+  async function sync() {
+    setBusy(true)
+    try {
+      const { result, status } = await syncFacebookReel()
+      setStatus(status)
+      if (result.status === "updated") toast.success("Newest Facebook reel is now on the public page")
+      else if (result.status === "unchanged") toast.success(result.reason ?? "Already showing the newest Facebook reel")
+      else toast.error(result.error ?? result.reason ?? "Could not sync")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reach Facebook.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const label =
+    from === "facebook"
+      ? `Facebook reel${status.postedAt ? ` from ${fmtDate(status.postedAt.slice(0, 10))}` : ""} · checked ${ago(status.lastSuccessAt)}`
+      : from === "upload"
+        ? "Playing your uploaded video"
+        : "Background video off"
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className={cn(CONTROL, "inline-flex h-8 max-w-80 items-center border px-3 text-xs", status.lastError && "border-amber-300/60")}
+        title={status.lastError || undefined}
+      >
+        <span className="truncate">{status.lastError ? `Facebook: ${status.lastError}` : label}</span>
+      </span>
+      <Button size="sm" variant="outline" className={CONTROL} disabled={busy} onClick={sync}>
+        <RefreshCwIcon data-icon="inline-start" className={cn(busy && "animate-spin")} />
+        {busy ? "Syncing…" : from === "facebook" ? "Sync now" : "Use Facebook reels"}
+      </Button>
+    </span>
   )
 }

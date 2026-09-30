@@ -169,6 +169,11 @@ export type Settings = {
   accountName: string
   // Landing page photo URL (/api/files/<id>). Falls back to a fleet photo.
   coverImage?: string
+  // Background video on the public availability page (/api/files/<id>),
+  // and where it came from: uploaded by the admin, the newest Facebook reel,
+  // or switched off (no video, don't fetch one).
+  coverVideo?: string
+  coverVideoFrom?: "upload" | "facebook" | "none"
 }
 
 // ---- Uploaded files (stored in S3-compatible storage) ----------------------
@@ -179,7 +184,7 @@ export type DocOwner = "booking" | "ledger" | "car_doc" | "driver_doc" | "indire
 
 export type FileMeta = {
   id: string
-  ownerType: DocOwner | "car_image" | "cover"
+  ownerType: DocOwner | "car_image" | "cover" | "cover_video"
   ownerId: string
   docType: string
   expiresOn?: string
@@ -208,3 +213,5 @@ export const DOC_TYPES: Record<DocOwner, { label: string; expires?: boolean }[]>
 }
 
 export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+// The public page's background video (a short, compressed clip).
+export const MAX_VIDEO_BYTES = 40 * 1024 * 1024
