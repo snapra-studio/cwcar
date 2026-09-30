@@ -16,11 +16,11 @@ import { todayInBusinessTz } from "@/lib/server/today"
 export default async function DriverHirePage({ params }: PageProps<"/driver/hires/[id]">) {
   const driver = await driverPage()
   const { id } = await params
-  const hire = getDriverHire(driver.id, id)
+  const hire = await getDriverHire(driver.id, id)
   if (!hire) notFound()
 
   const status = hireStatus(hire, todayInBusinessTz())
-  const cars = getCarInfo(hire.myCars.map((c) => c.carId))
+  const cars = await getCarInfo(hire.myCars.map((c) => c.carId))
   const others = hire.cars.length - hire.myCars.length
 
   return (

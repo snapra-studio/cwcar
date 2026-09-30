@@ -20,6 +20,7 @@ export async function GET(request: Request) {
   if ((Date.parse(to) - Date.parse(from)) / 86_400_000 > 95) {
     return NextResponse.json({ error: "Ask for 3 months or less at a time." }, { status: 400 })
   }
+  const [settings, cars, booked] = await Promise.all([getSettings(), getPublicCars(), getBookedCarIds(from, to)])
   return NextResponse.json(
     {
       // Public contact details only (same as printed on invoices).
@@ -28,9 +29,9 @@ export async function GET(request: Request) {
         phone: bizPhone,
         email: bizEmail,
         address: bizAddr,
-      }))(getSettings()),
-      cars: getPublicCars(),
-      booked: getBookedCarIds(from, to),
+      }))(settings),
+      cars,
+      booked,
     },
     { headers: { "Cache-Control": "no-store" } }
   )

@@ -51,7 +51,7 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   if (checkAdminCredentials(email, password)) {
     session = { sub: "admin", role: "admin" }
   } else {
-    const driver = findDriverForLogin(email)
+    const driver = await findDriverForLogin(email)
     // Always run one hash check so unknown emails take as long as known ones.
     const ok = await verifyPassword(password, driver?.passwordHash ?? (await dummyHash()))
     if (driver && ok) {

@@ -1,29 +1,32 @@
 import "server-only"
 
+import type { z } from "zod"
+
 import { FRESH_FLOWER_COST, pad, uid } from "@/lib/bridal/format"
 import { DEFAULT_SETTINGS, DEMO_CARS, upgradeBooking, upgradeSettings, type LegacyBooking } from "@/lib/bridal/logic"
-import type {
-  BookedCar,
-  Booking,
-  Car,
-  Driver,
-  DriverStatus,
-  LedgerEntry,
-  Settings,
-} from "@/lib/bridal/types"
-import { db, tx } from "@/lib/server/db"
+import type { BookedCar, Booking, Car, Driver, DriverStatus, LedgerEntry, Settings } from "@/lib/bridal/types"
+import { isUniqueViolation, q, tx, type Db, type Row } from "@/lib/server/db"
 import { hashPassword } from "@/lib/server/password"
-import type { z } from "zod"
-import type { bookingInputSchema, carSchema, driverCreateSchema, driverUpdateSchema, ledgerSchema, settingsSchema } from "@/lib/server/schemas"
+import type {
+  bookingInputSchema,
+  carSchema,
+  driverCreateSchema,
+  driverUpdateSchema,
+  ledgerSchema,
+  settingsSchema,
+} from "@/lib/server/schemas"
 
-// Data access layer. Every read/write of the database goes through here, and
-// callers (server actions, route handlers, server pages) do the permission
-// check first via lib/server/guard.ts.
+// Data access layer (PostgreSQL). Every read/write of the database goes
+// through here, and callers (server actions, route handlers, server pages) do
+// the permission check first via lib/server/guard.ts.
+//
+// The database is far away (~250 ms per round trip), so functions keep the
+// number of queries low: bookings load with their cars in one query, checks
+// are combined, and inserts are sent in bulk.
 
 // Thrown for problems the user can fix (shown as-is in the UI).
 export class UserError extends Error {}
 
-type Row = Record<string, unknown>
 const str = (v: unknown) => (v == null ? undefined : String(v))
 const num = (v: unknown) => (v == null ? undefined : Number(v))
 
@@ -57,13 +60,13 @@ function toBookedCar(r: Row): BookedCar {
     driverId: str(r.driver_id),
     pickupTime: String(r.pickup_time),
     pickupLoc: String(r.pickup_loc),
-    stops: JSON.parse(String(r.stops ?? "[]")),
+    stops: (r.stops as BookedCar["stops"]) ?? [],
     dropTime: String(r.drop_time),
     dropLoc: String(r.drop_loc),
   }
 }
 
-function toBooking(r: Row, cars: BookedCar[]): Booking {
+function toBooking(r: Row): Booking {
   return {
     id: String(r.id),
     invNo: String(r.inv_no),
@@ -72,7 +75,7 @@ function toBooking(r: Row, cars: BookedCar[]): Booking {
     revision: Number(r.revision ?? 1),
     status: r.status as Booking["status"],
     date: String(r.date),
-    cars,
+    cars: ((r.cars as Row[]) ?? []).map(toBookedCar),
     type: r.type as Booking["type"],
     customer: String(r.customer),
     phone: String(r.phone),
@@ -110,91 +113,81 @@ function toDriver(r: Row): Driver {
   }
 }
 
-// Loads bookings (optionally filtered by a WHERE on the bookings table) with
-// their cars in order.
-function loadBookings(where = "", params: (string | number)[] = []): Booking[] {
-  const rows = db.prepare(`SELECT * FROM bookings ${where} ORDER BY date, created_at`).all(...params) as Row[]
-  if (!rows.length) return []
-  const ids = rows.map((r) => String(r.id))
-  const carRows = db
-    .prepare(`SELECT * FROM booking_cars WHERE booking_id IN (${ids.map(() => "?").join(",")}) ORDER BY position`)
-    .all(...ids) as Row[]
-  const byBooking = new Map<string, BookedCar[]>()
-  for (const c of carRows) {
-    const list = byBooking.get(String(c.booking_id)) ?? []
-    list.push(toBookedCar(c))
-    byBooking.set(String(c.booking_id), list)
-  }
-  return rows.map((r) => toBooking(r, byBooking.get(String(r.id)) ?? []))
+// Bookings with their cars (in order) in a single query. `where` filters the
+// bookings table, aliased b; $n placeholders refer to `params`.
+async function loadBookings(where = "", params: unknown[] = [], db?: Db): Promise<Booking[]> {
+  const text = `
+    SELECT b.*,
+      COALESCE(
+        (SELECT json_agg(bc ORDER BY bc.position) FROM booking_cars bc WHERE bc.booking_id = b.id),
+        '[]'
+      ) AS cars
+    FROM bookings b
+    ${where}
+    ORDER BY b.date, b.created_at`
+  const rows = db ? (await db.query(text, params)).rows : await q(text, params)
+  return rows.map(toBooking)
 }
 
 // ---- Settings & flags -------------------------------------------------------
 
-function kvGet(key: string) {
-  const row = db.prepare("SELECT value FROM kv WHERE key = ?").get(key) as Row | undefined
-  return row ? String(row.value) : undefined
-}
-function kvSet(key: string, value: string) {
-  db.prepare("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(
-    key,
-    value
-  )
-}
-
-export function getSettings(): Settings {
-  const raw = kvGet("settings")
-  return { ...DEFAULT_SETTINGS, ...(raw ? JSON.parse(raw) : {}) }
+export async function getSettings(): Promise<Settings> {
+  const [row] = await q("SELECT value FROM kv WHERE key = 'settings'")
+  return { ...DEFAULT_SETTINGS, ...(row ? JSON.parse(String(row.value)) : {}) }
 }
 
 // Business details for invoices, without the landing-page photo.
-export function getInvoiceSettings(): Settings {
-  const { coverImage: _cover, ...rest } = getSettings()
+export async function getInvoiceSettings(): Promise<Settings> {
+  const { coverImage: _cover, ...rest } = await getSettings()
   void _cover
   return rest
 }
 
-// Business details; the landing photo is kept unless a new one is given.
-export function saveSettings(input: z.infer<typeof settingsSchema>): Settings {
-  const next = { ...getSettings(), ...input }
-  kvSet("settings", JSON.stringify(next))
-  return next
+// Merges into the stored JSON in one statement (the landing photo is kept
+// unless a new one is given).
+async function mergeSettings(patch: Partial<Settings>, removeCover = false): Promise<Settings> {
+  const [row] = await q(
+    `INSERT INTO kv (key, value) VALUES ('settings', $1)
+     ON CONFLICT (key) DO UPDATE SET value = ((kv.value::jsonb || excluded.value::jsonb) - $2::text[])::text
+     RETURNING value`,
+    [JSON.stringify(patch), removeCover ? ["coverImage"] : []]
+  )
+  return { ...DEFAULT_SETTINGS, ...JSON.parse(String(row.value)) }
 }
 
-export function setCoverImage(image: string | undefined): Settings {
-  const next = { ...getSettings() }
-  if (image) next.coverImage = image
-  else delete next.coverImage
-  kvSet("settings", JSON.stringify(next))
-  return next
-}
+export const saveSettings = (input: z.infer<typeof settingsSchema>) => mergeSettings(input)
 
-export const isInitialized = () => kvGet("initialized") === "1"
+export const setCoverImage = (image: string | undefined) =>
+  image ? mergeSettings({ coverImage: image }) : mergeSettings({}, true)
 
 // ---- Admin snapshot -----------------------------------------------------------
 
-export function getAdminState() {
+export async function getAdminState() {
+  const [cars, bookings, ledger, kv, drivers] = await Promise.all([
+    q("SELECT * FROM cars ORDER BY name"),
+    loadBookings(),
+    q("SELECT * FROM ledger ORDER BY date, created_at"),
+    q("SELECT key, value FROM kv WHERE key IN ('settings', 'initialized')"),
+    listDrivers(),
+  ])
+  const settings = kv.find((r) => r.key === "settings")
   return {
-    initialized: isInitialized(),
-    cars: (db.prepare("SELECT * FROM cars ORDER BY name").all() as Row[]).map(toCar),
-    bookings: loadBookings(),
-    ledger: (db.prepare("SELECT * FROM ledger ORDER BY date, created_at").all() as Row[]).map(toLedger),
-    settings: getSettings(),
-    drivers: listDrivers(),
+    initialized: kv.some((r) => r.key === "initialized" && r.value === "1"),
+    cars: cars.map(toCar),
+    bookings,
+    ledger: ledger.map(toLedger),
+    settings: { ...DEFAULT_SETTINGS, ...(settings ? JSON.parse(String(settings.value)) : {}) } as Settings,
+    drivers,
   }
 }
 
 // ---- Cars ---------------------------------------------------------------------
 
-function writeCar(id: string, c: Omit<Car, "id">) {
+const CAR_COLUMNS = "id, name, color, hex, style, plate, rate, image, fleet, owner_name, owner_phone, owner_cost"
+
+function carValues(id: string, c: Omit<Car, "id">) {
   const partner = c.fleet === "partner"
-  db.prepare(
-    `INSERT INTO cars (id, name, color, hex, style, plate, rate, image, fleet, owner_name, owner_phone, owner_cost)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET name = excluded.name, color = excluded.color, hex = excluded.hex,
-       style = excluded.style, plate = excluded.plate, rate = excluded.rate, image = excluded.image,
-       fleet = excluded.fleet, owner_name = excluded.owner_name, owner_phone = excluded.owner_phone,
-       owner_cost = excluded.owner_cost`
-  ).run(
+  return [
     id,
     c.name,
     c.color,
@@ -206,289 +199,354 @@ function writeCar(id: string, c: Omit<Car, "id">) {
     partner ? "partner" : "own",
     partner ? (c.ownerName ?? "") : null,
     partner ? (c.ownerPhone ?? "") : null,
-    partner ? (c.ownerCost ?? 0) : null
-  )
+    partner ? (c.ownerCost ?? 0) : null,
+  ]
 }
 
-const getCar = (id: string) => {
-  const r = db.prepare("SELECT * FROM cars WHERE id = ?").get(id) as Row | undefined
-  return r ? toCar(r) : undefined
-}
-
-export function addCar(input: z.infer<typeof carSchema>): Car {
+export async function addCar(input: z.infer<typeof carSchema>): Promise<Car> {
   const slug = `${input.name}-${input.color}`
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 40)
-  const id = `${slug || "car"}-${uid().slice(-4)}`
-  writeCar(id, input)
-  return getCar(id)!
+  const [row] = await q(
+    `INSERT INTO cars (${CAR_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+    carValues(`${slug || "car"}-${uid().slice(-4)}`, input)
+  )
+  return toCar(row)
 }
 
 // Existing bookings keep the car name/rate they were made with, so past
 // invoices don't change when the catalogue is edited.
-export function updateCar(id: string, input: z.infer<typeof carSchema>): Car {
-  if (!getCar(id)) throw new UserError("That car no longer exists.")
-  writeCar(id, input)
-  return getCar(id)!
+export async function updateCar(id: string, input: z.infer<typeof carSchema>): Promise<Car> {
+  const [row] = await q(
+    `UPDATE cars SET name = $2, color = $3, hex = $4, style = $5, plate = $6, rate = $7, image = $8, fleet = $9,
+       owner_name = $10, owner_phone = $11, owner_cost = $12
+     WHERE id = $1 RETURNING *`,
+    carValues(id, input)
+  )
+  if (!row) throw new UserError("That car no longer exists.")
+  return toCar(row)
 }
 
-export function setCarImage(id: string, image: string | undefined): Car {
-  const car = getCar(id)
-  if (!car) throw new UserError("That car no longer exists.")
-  db.prepare("UPDATE cars SET image = ? WHERE id = ?").run(image ?? null, id)
-  return { ...car, image }
+export async function setCarImage(id: string, image: string | undefined): Promise<Car> {
+  const [row] = await q("UPDATE cars SET image = $2 WHERE id = $1 RETURNING *", [id, image ?? null])
+  if (!row) throw new UserError("That car no longer exists.")
+  return toCar(row)
 }
 
-export function removeCar(id: string) {
-  db.prepare("DELETE FROM cars WHERE id = ?").run(id)
+export async function removeCar(id: string) {
+  await q("DELETE FROM cars WHERE id = $1", [id])
 }
 
 // ---- Bookings -----------------------------------------------------------------
 
 type BookingInput = z.infer<typeof bookingInputSchema>
 
-// Recalculates money from the cars (never trusts totals from the browser),
-// and checks every car and driver.
-function prepareBooking(input: BookingInput, existing?: Booking) {
+// Everything a save needs to validate, fetched in one round trip.
+async function bookingChecks(db: Db, input: BookingInput, excludeId: string) {
+  const carIds = input.cars.map((c) => c.carId)
+  const driverIds = input.cars.flatMap((c) => (c.driverId ? [c.driverId] : []))
+  const { rows } = await db.query(
+    `SELECT
+       (SELECT COALESCE(json_agg(id), '[]') FROM cars WHERE id = ANY($1::text[])) AS cars,
+       (SELECT COALESCE(json_agg(json_build_object('id', id, 'status', status)), '[]')
+          FROM users WHERE role = 'driver' AND id = ANY($2::text[])) AS drivers,
+       (SELECT COALESCE(json_agg(car_name), '[]') FROM booking_cars
+          WHERE active AND hire_date = $3::date AND booking_id <> $4 AND car_id = ANY($1::text[])) AS clash,
+       (SELECT count(*)::int FROM bookings WHERE date_part('year', date) = date_part('year', $3::date)) AS year_count`,
+    [carIds, driverIds, input.date, excludeId]
+  )
+  const r = rows[0]
+  return {
+    existingCars: new Set(r.cars as string[]),
+    drivers: new Map((r.drivers as { id: string; status: string }[]).map((d) => [d.id, d.status])),
+    clash: r.clash as string[],
+    yearCount: Number(r.year_count),
+  }
+}
+
+// Recalculates money from the cars (never trusts totals from the browser) and
+// checks every car and driver. The clash check gives a friendly message; the
+// ux_car_day index is the hard guarantee.
+function validate(input: BookingInput, checks: Awaited<ReturnType<typeof bookingChecks>>, existing?: Booking) {
   const seen = new Set<string>()
   for (const c of input.cars) {
     if (seen.has(c.carId)) throw new UserError("The same car is on this hire twice.")
     seen.add(c.carId)
     // A car removed from the catalogue may stay on a hire it was already on.
     const onExisting = existing?.cars.some((x) => x.carId === c.carId)
-    if (!getCar(c.carId) && !onExisting) throw new UserError(`${c.carName} is no longer in the fleet.`)
+    if (!checks.existingCars.has(c.carId) && !onExisting) throw new UserError(`${c.carName} is no longer in the fleet.`)
     if (c.driverId) {
-      const d = getDriverRow(c.driverId)
+      const status = checks.drivers.get(c.driverId)
       const keptSame = existing?.cars.some((x) => x.carId === c.carId && x.driverId === c.driverId)
-      if (!d || (d.status !== "active" && !keptSame)) throw new UserError("Pick an active driver.")
+      if (!status || (status !== "active" && !keptSame)) throw new UserError("Pick an active driver.")
     }
   }
+  if (checks.clash.length) throw new UserError(`Already booked on that date: ${checks.clash.join(", ")}.`)
   const rate = input.cars.reduce((n, c) => n + c.rate, 0)
   const decoCost = input.deco === "fresh" ? FRESH_FLOWER_COST * input.cars.length : 0
   const total = rate + decoCost
   return { rate, decoCost, total, balance: Math.max(0, total - input.advance) }
 }
 
-// Friendly double-booking check; the ux_car_day index is the hard guarantee.
-function assertCarsFree(date: string, carIds: string[], excludeId?: string) {
-  const clash = db
-    .prepare(
-      `SELECT bc.car_name FROM booking_cars bc
-       WHERE bc.active = 1 AND bc.hire_date = ? AND bc.booking_id != ?
-         AND bc.car_id IN (${carIds.map(() => "?").join(",")})`
-    )
-    .all(date, excludeId ?? "", ...carIds) as Row[]
-  if (clash.length) {
-    throw new UserError(`Already booked on that date: ${clash.map((r) => r.car_name).join(", ")}.`)
-  }
-}
-
-function writeBookingCars(bookingId: string, date: string, active: boolean, cars: BookingInput["cars"]) {
-  db.prepare("DELETE FROM booking_cars WHERE booking_id = ?").run(bookingId)
-  const insert = db.prepare(
+// Inserts all cars of a hire in one statement.
+async function insertBookingCars(db: Db, bookingId: string, date: string, active: boolean, cars: BookingInput["cars"]) {
+  const rows = cars.map((c, i) => {
+    const partner = c.fleet === "partner"
+    return {
+      position: i,
+      car_id: c.carId,
+      car_name: c.carName,
+      rate: c.rate,
+      fleet: partner ? "partner" : null,
+      owner_name: partner ? (c.ownerName ?? "") : null,
+      owner_cost: partner ? (c.ownerCost ?? 0) : null,
+      driver_id: c.driverId ?? null,
+      pickup_time: c.pickupTime,
+      pickup_loc: c.pickupLoc,
+      stops: c.stops,
+      drop_time: c.dropTime,
+      drop_loc: c.dropLoc,
+    }
+  })
+  await db.query(
     `INSERT INTO booking_cars (booking_id, position, car_id, car_name, rate, fleet, owner_name, owner_cost, driver_id,
        pickup_time, pickup_loc, stops, drop_time, drop_loc, hire_date, active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     SELECT $1, r.position, r.car_id, r.car_name, r.rate, r.fleet, r.owner_name, r.owner_cost, r.driver_id,
+       r.pickup_time, r.pickup_loc, r.stops, r.drop_time, r.drop_loc, $2::date, $3
+     FROM jsonb_to_recordset($4::jsonb) AS r(position int, car_id text, car_name text, rate int, fleet text,
+       owner_name text, owner_cost int, driver_id text, pickup_time text, pickup_loc text, stops jsonb,
+       drop_time text, drop_loc text)`,
+    [bookingId, date, active, JSON.stringify(rows)]
   )
-  cars.forEach((c, i) => {
-    const partner = c.fleet === "partner"
-    insert.run(
-      bookingId,
-      i,
-      c.carId,
-      c.carName,
-      c.rate,
-      partner ? "partner" : null,
-      partner ? (c.ownerName ?? "") : null,
-      partner ? (c.ownerCost ?? 0) : null,
-      c.driverId ?? null,
-      c.pickupTime,
-      c.pickupLoc,
-      JSON.stringify(c.stops),
-      c.dropTime,
-      c.dropLoc,
-      date,
-      active ? 1 : 0
-    )
-  })
 }
 
-// SQLite reports the ux_car_day index as a constraint error; turn it into the
-// same message as the friendly check.
-function guardUnique<T>(fn: () => T): T {
+// Turns the double-booking index into the same message as the friendly check.
+async function guardDoubleBooking<T>(fn: () => Promise<T>): Promise<T> {
   try {
-    return fn()
+    return await fn()
   } catch (err) {
-    if (err instanceof Error && /UNIQUE constraint failed: booking_cars/.test(err.message)) {
+    if (isUniqueViolation(err, "ux_car_day")) {
       throw new UserError("One of these cars was just booked for that date. Pick another car.")
     }
     throw err
   }
 }
 
-export const getBooking = (id: string) => loadBookings("WHERE id = ?", [id])[0]
+const invNoFor = (date: string, n: number, id: string) =>
+  `WC-${date.replace(/-/g, "").slice(2)}-${pad(n)}${id.slice(-2).toUpperCase()}`
 
-function nextInvNo(date: string, id: string) {
-  const year = date.slice(0, 4)
-  const row = db.prepare("SELECT COUNT(*) AS n FROM bookings WHERE substr(date, 1, 4) = ?").get(year) as Row
-  let n = Number(row.n) + 1
-  // The random tail keeps numbers unique even if counts collide; loop just in case.
-  for (;;) {
-    const invNo = `WC-${date.replace(/-/g, "").slice(2)}-${pad(n)}${id.slice(-2).toUpperCase()}`
-    if (!db.prepare("SELECT 1 FROM bookings WHERE inv_no = ?").get(invNo)) return invNo
-    n += 1
-  }
+export async function getBooking(id: string) {
+  return (await loadBookings("WHERE b.id = $1", [id]))[0]
 }
 
-export function createBooking(input: BookingInput): Booking {
-  return guardUnique(() =>
-    tx(() => {
-      const money = prepareBooking(input)
-      assertCarsFree(input.date, input.cars.map((c) => c.carId))
-      const id = uid()
-      db.prepare(
-        `INSERT INTO bookings (id, inv_no, created_at, revision, status, date, type, customer, phone, address, deco,
-           rate, deco_cost, total, advance, balance)
-         VALUES (?, ?, ?, 1, 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        id,
-        nextInvNo(input.date, id),
-        new Date().toISOString(),
-        input.date,
-        input.type,
-        input.customer,
-        input.phone,
-        input.address,
-        input.deco,
-        money.rate,
-        money.decoCost,
-        money.total,
-        input.advance,
-        money.balance
+export async function createBooking(input: BookingInput): Promise<Booking> {
+  // Retries only if two saves pick the same invoice number at once.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await guardDoubleBooking(() =>
+        tx(async (db) => {
+          const checks = await bookingChecks(db, input, "")
+          const money = validate(input, checks)
+          const id = uid()
+          const createdAt = new Date().toISOString()
+          const invNo = invNoFor(input.date, checks.yearCount + 1 + attempt, id)
+          await db.query(
+            `INSERT INTO bookings (id, inv_no, created_at, revision, status, date, type, customer, phone, address, deco,
+               rate, deco_cost, total, advance, balance)
+             VALUES ($1, $2, $3, 1, 'confirmed', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+            [
+              id,
+              invNo,
+              createdAt,
+              input.date,
+              input.type,
+              input.customer,
+              input.phone,
+              input.address,
+              input.deco,
+              money.rate,
+              money.decoCost,
+              money.total,
+              input.advance,
+              money.balance,
+            ]
+          )
+          await insertBookingCars(db, id, input.date, true, input.cars)
+          return {
+            id,
+            invNo,
+            createdAt,
+            revision: 1,
+            status: "confirmed",
+            date: input.date,
+            cars: input.cars,
+            type: input.type,
+            customer: input.customer,
+            phone: input.phone,
+            address: input.address,
+            deco: input.deco,
+            ...money,
+            advance: input.advance,
+          } satisfies Booking
+        })
       )
-      writeBookingCars(id, input.date, true, input.cars)
-      return getBooking(id)!
-    })
-  )
+    } catch (err) {
+      if (attempt < 5 && isUniqueViolation(err, "bookings_inv_no_key")) continue
+      throw err
+    }
+  }
 }
 
 // Keeps the invoice number and creation date; bumps the revision so the
 // re-issued invoice is marked as revised.
-export function updateBooking(id: string, input: BookingInput): Booking {
-  return guardUnique(() =>
-    tx(() => {
-      const existing = getBooking(id)
-      if (!existing) throw new UserError("That booking no longer exists.")
+export async function updateBooking(id: string, input: BookingInput): Promise<Booking> {
+  return guardDoubleBooking(() =>
+    tx(async (db) => {
+      // Lock the booking so two edits can't interleave.
+      const locked = await db.query("SELECT id FROM bookings WHERE id = $1 FOR UPDATE", [id])
+      if (!locked.rowCount) throw new UserError("That booking no longer exists.")
+      const [existing] = await loadBookings("WHERE b.id = $1", [id], db)
       if (existing.status === "cancelled") throw new UserError("A cancelled booking can't be edited.")
-      const money = prepareBooking(input, existing)
-      assertCarsFree(input.date, input.cars.map((c) => c.carId), id)
-      db.prepare(
-        `UPDATE bookings SET updated_at = ?, revision = revision + 1, date = ?, type = ?, customer = ?, phone = ?,
-           address = ?, deco = ?, rate = ?, deco_cost = ?, total = ?, advance = ?, balance = ?
-         WHERE id = ?`
-      ).run(
-        new Date().toISOString(),
-        input.date,
-        input.type,
-        input.customer,
-        input.phone,
-        input.address,
-        input.deco,
-        money.rate,
-        money.decoCost,
-        money.total,
-        input.advance,
-        money.balance,
-        id
+      const money = validate(input, await bookingChecks(db, input, id), existing)
+      const updatedAt = new Date().toISOString()
+      await db.query(
+        `WITH u AS (
+           UPDATE bookings SET updated_at = $2, revision = revision + 1, date = $3, type = $4, customer = $5, phone = $6,
+             address = $7, deco = $8, rate = $9, deco_cost = $10, total = $11, advance = $12, balance = $13
+           WHERE id = $1
+         )
+         DELETE FROM booking_cars WHERE booking_id = $1`,
+        [
+          id,
+          updatedAt,
+          input.date,
+          input.type,
+          input.customer,
+          input.phone,
+          input.address,
+          input.deco,
+          money.rate,
+          money.decoCost,
+          money.total,
+          input.advance,
+          money.balance,
+        ]
       )
-      writeBookingCars(id, input.date, true, input.cars)
-      return getBooking(id)!
+      await insertBookingCars(db, id, input.date, true, input.cars)
+      return {
+        ...existing,
+        updatedAt,
+        revision: (existing.revision ?? 1) + 1,
+        date: input.date,
+        cars: input.cars,
+        type: input.type,
+        customer: input.customer,
+        phone: input.phone,
+        address: input.address,
+        deco: input.deco,
+        ...money,
+        advance: input.advance,
+      }
     })
   )
 }
 
 // Cancelled hires stay on record but free their cars.
-export function cancelBooking(id: string): Booking {
-  return tx(() => {
-    const existing = getBooking(id)
-    if (!existing) throw new UserError("That booking no longer exists.")
-    db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").run(id)
-    db.prepare("UPDATE booking_cars SET active = 0 WHERE booking_id = ?").run(id)
-    return getBooking(id)!
-  })
+export async function cancelBooking(id: string): Promise<Booking> {
+  await q(
+    `WITH b AS (UPDATE bookings SET status = 'cancelled' WHERE id = $1 RETURNING id)
+     UPDATE booking_cars SET active = false WHERE booking_id IN (SELECT id FROM b)
+     RETURNING booking_id`,
+    [id]
+  )
+  const booking = await getBooking(id)
+  if (!booking) throw new UserError("That booking no longer exists.")
+  return booking
 }
 
 // ---- Ledger -------------------------------------------------------------------
 
-export function addLedgerEntry(input: z.infer<typeof ledgerSchema>): LedgerEntry {
-  if (!db.prepare("SELECT 1 FROM bookings WHERE id = ?").get(input.bookingId)) {
-    throw new UserError("That hire no longer exists.")
-  }
-  const entry: LedgerEntry = { ...input, id: uid(), createdAt: new Date().toISOString() }
-  db.prepare(
-    "INSERT INTO ledger (id, booking_id, kind, category, note, amount, date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(entry.id, entry.bookingId, entry.kind, entry.category, entry.note, entry.amount, entry.date, entry.createdAt)
-  return entry
+export async function addLedgerEntry(input: z.infer<typeof ledgerSchema>): Promise<LedgerEntry> {
+  const [row] = await q(
+    `INSERT INTO ledger (id, booking_id, kind, category, note, amount, date, created_at)
+     SELECT $1, $2, $3, $4, $5, $6, $7, now() WHERE EXISTS (SELECT 1 FROM bookings WHERE id = $2)
+     RETURNING *`,
+    [uid(), input.bookingId, input.kind, input.category, input.note, input.amount, input.date]
+  )
+  if (!row) throw new UserError("That hire no longer exists.")
+  return toLedger(row)
 }
 
-export function removeLedgerEntry(id: string) {
-  db.prepare("DELETE FROM ledger WHERE id = ?").run(id)
+export async function removeLedgerEntry(id: string) {
+  await q("DELETE FROM ledger WHERE id = $1", [id])
 }
 
 // ---- Drivers ------------------------------------------------------------------
 
-const getDriverRow = (id: string) => db.prepare("SELECT * FROM users WHERE id = ? AND role = 'driver'").get(id) as Row | undefined
+export async function listDrivers() {
+  return (await q("SELECT * FROM users WHERE role = 'driver' ORDER BY name")).map(toDriver)
+}
 
-export const listDrivers = () =>
-  (db.prepare("SELECT * FROM users WHERE role = 'driver' ORDER BY name").all() as Row[]).map(toDriver)
-
-export function getDriver(id: string) {
-  const r = getDriverRow(id)
+export async function getDriver(id: string) {
+  const [r] = await q("SELECT * FROM users WHERE id = $1 AND role = 'driver'", [id])
   return r ? toDriver(r) : undefined
 }
 
 // For login only: includes the hash.
-export function findDriverForLogin(email: string) {
-  const r = db.prepare("SELECT * FROM users WHERE email = ? AND role = 'driver'").get(email) as Row | undefined
+export async function findDriverForLogin(email: string) {
+  const [r] = await q("SELECT * FROM users WHERE lower(email) = lower($1) AND role = 'driver'", [email])
   return r ? { ...toDriver(r), passwordHash: String(r.password_hash) } : undefined
 }
 
-function assertEmailFree(email: string, exceptId?: string) {
+function assertNotAdminEmail(email: string) {
   if (process.env.ADMIN_EMAIL && email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase()) {
     throw new UserError("That email is the admin login. Use a different one.")
   }
-  const r = db.prepare("SELECT id FROM users WHERE email = ? AND id != ?").get(email, exceptId ?? "")
-  if (r) throw new UserError("Another driver already uses that email.")
+}
+
+// The lower(email) unique index reports a duplicate; say it plainly.
+async function uniqueEmail<T>(fn: () => Promise<T>) {
+  try {
+    return await fn()
+  } catch (err) {
+    if (isUniqueViolation(err, "ux_users_email")) throw new UserError("Another driver already uses that email.")
+    throw err
+  }
 }
 
 export async function createDriver(input: z.infer<typeof driverCreateSchema>): Promise<Driver> {
-  assertEmailFree(input.email)
-  const id = `drv-${uid()}`
+  assertNotAdminEmail(input.email)
   const hash = await hashPassword(input.password)
-  db.prepare(
-    "INSERT INTO users (id, name, email, phone, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, 'driver', 'active', ?, ?)"
-  ).run(id, input.name, input.email, input.phone, hash, new Date().toISOString())
-  return getDriver(id)!
+  return uniqueEmail(async () => {
+    const [row] = await q(
+      `INSERT INTO users (id, name, email, phone, role, status, password_hash)
+       VALUES ($1, $2, $3, $4, 'driver', 'active', $5) RETURNING *`,
+      [`drv-${uid()}`, input.name, input.email, input.phone, hash]
+    )
+    return toDriver(row)
+  })
 }
 
-export function updateDriver(id: string, input: z.infer<typeof driverUpdateSchema>): Driver {
-  if (!getDriverRow(id)) throw new UserError("That driver no longer exists.")
-  assertEmailFree(input.email, id)
-  db.prepare("UPDATE users SET name = ?, email = ?, phone = ?, status = ? WHERE id = ?").run(
-    input.name,
-    input.email,
-    input.phone,
-    input.status,
-    id
-  )
-  return getDriver(id)!
+export async function updateDriver(id: string, input: z.infer<typeof driverUpdateSchema>): Promise<Driver> {
+  assertNotAdminEmail(input.email)
+  return uniqueEmail(async () => {
+    const [row] = await q(
+      "UPDATE users SET name = $2, email = $3, phone = $4, status = $5 WHERE id = $1 AND role = 'driver' RETURNING *",
+      [id, input.name, input.email, input.phone, input.status]
+    )
+    if (!row) throw new UserError("That driver no longer exists.")
+    return toDriver(row)
+  })
 }
 
 export async function setDriverPassword(id: string, password: string) {
-  if (!getDriverRow(id)) throw new UserError("That driver no longer exists.")
-  db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(await hashPassword(password), id)
+  const [row] = await q("UPDATE users SET password_hash = $2 WHERE id = $1 AND role = 'driver' RETURNING id", [
+    id,
+    await hashPassword(password),
+  ])
+  if (!row) throw new UserError("That driver no longer exists.")
 }
 
 // ---- Driver views (always scoped to one driver) ---------------------------------
@@ -496,33 +554,47 @@ export async function setDriverPassword(id: string, password: string) {
 // A hire as a driver sees it: only the cars they drive on it.
 export type DriverHire = Booking & { myCars: BookedCar[] }
 
-function scopeToDriver(b: Booking, driverId: string): DriverHire {
-  return { ...b, myCars: b.cars.filter((c) => c.driverId === driverId) }
-}
+const scopeToDriver = (b: Booking, driverId: string): DriverHire => ({
+  ...b,
+  myCars: b.cars.filter((c) => c.driverId === driverId),
+})
 
 // Hires from `fromDate` on where this driver drives at least one car.
-export function getDriverHires(driverId: string, fromDate: string): DriverHire[] {
-  return loadBookings(
-    "WHERE date >= ? AND id IN (SELECT booking_id FROM booking_cars WHERE driver_id = ?)",
+export async function getDriverHires(driverId: string, fromDate: string): Promise<DriverHire[]> {
+  const hires = await loadBookings(
+    "WHERE b.date >= $1 AND EXISTS (SELECT 1 FROM booking_cars x WHERE x.booking_id = b.id AND x.driver_id = $2)",
     [fromDate, driverId]
-  ).map((b) => scopeToDriver(b, driverId))
+  )
+  return hires.map((b) => scopeToDriver(b, driverId))
 }
 
 // One hire, only if this driver is on it; otherwise undefined (callers 404).
-export function getDriverHire(driverId: string, bookingId: string): DriverHire | undefined {
-  const b = loadBookings(
-    "WHERE id = ? AND id IN (SELECT booking_id FROM booking_cars WHERE driver_id = ?)",
+export async function getDriverHire(driverId: string, bookingId: string): Promise<DriverHire | undefined> {
+  const [b] = await loadBookings(
+    "WHERE b.id = $1 AND EXISTS (SELECT 1 FROM booking_cars x WHERE x.booking_id = b.id AND x.driver_id = $2)",
     [bookingId, driverId]
-  )[0]
+  )
   return b ? scopeToDriver(b, driverId) : undefined
+}
+
+// Photo, plate and look of the given cars, for the driver's hire cards.
+export async function getCarInfo(ids: string[]) {
+  if (!ids.length) return {}
+  const rows = await q("SELECT id, name, hex, style, image, plate FROM cars WHERE id = ANY($1::text[])", [ids])
+  return Object.fromEntries(
+    rows.map((r) => [
+      String(r.id),
+      { name: String(r.name), hex: String(r.hex), style: r.style as Car["style"], image: str(r.image), plate: String(r.plate ?? "") },
+    ])
+  )
 }
 
 // ---- Public availability (no customer, price, route or driver data) -----------------
 
 export type PublicCar = Pick<Car, "id" | "name" | "color" | "hex" | "style" | "image">
 
-export const getPublicCars = (): PublicCar[] =>
-  (db.prepare("SELECT id, name, color, hex, style, image FROM cars ORDER BY name").all() as Row[]).map((r) => ({
+export async function getPublicCars(): Promise<PublicCar[]> {
+  return (await q("SELECT id, name, color, hex, style, image FROM cars ORDER BY name")).map((r) => ({
     id: String(r.id),
     name: String(r.name),
     color: String(r.color),
@@ -530,14 +602,14 @@ export const getPublicCars = (): PublicCar[] =>
     style: r.style as Car["style"],
     image: str(r.image),
   }))
+}
 
 // date -> ids of cars with an active hire that day, for from..to inclusive.
-export function getBookedCarIds(from: string, to: string): Record<string, string[]> {
-  const rows = db
-    .prepare(
-      "SELECT DISTINCT hire_date, car_id FROM booking_cars WHERE active = 1 AND hire_date BETWEEN ? AND ? ORDER BY hire_date"
-    )
-    .all(from, to) as Row[]
+export async function getBookedCarIds(from: string, to: string): Promise<Record<string, string[]>> {
+  const rows = await q(
+    "SELECT DISTINCT hire_date, car_id FROM booking_cars WHERE active AND hire_date BETWEEN $1 AND $2 ORDER BY hire_date",
+    [from, to]
+  )
   const out: Record<string, string[]> = {}
   for (const r of rows) (out[String(r.hire_date)] ??= []).push(String(r.car_id))
   return out
@@ -552,105 +624,164 @@ type ImportPayload = {
   settings?: Partial<Settings>
 }
 
-// Moves data saved in the admin's browser (older versions) into the database,
+// Moves data an older version saved in the admin's browser into the database,
 // once. With nothing to import, starts with the demo fleet.
-export function initializeFrom(payload: ImportPayload | null) {
-  return tx(() => {
-    if (isInitialized()) return { imported: false }
-    if (payload) {
-      for (const c of payload.cars ?? []) writeCar(c.id, c)
-      for (const legacy of payload.bookings ?? []) {
-        const b = upgradeBooking(legacy)
-        db.prepare(
-          `INSERT OR IGNORE INTO bookings (id, inv_no, created_at, updated_at, revision, status, date, type, customer,
-             phone, address, deco, rate, deco_cost, total, advance, balance)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).run(
-          b.id,
-          b.invNo,
-          b.createdAt,
-          b.updatedAt ?? null,
-          b.revision ?? 1,
-          b.status,
-          b.date,
-          b.type,
-          b.customer,
-          b.phone,
-          b.address ?? "",
-          b.deco,
-          b.rate,
-          b.decoCost,
-          b.total,
-          b.advance,
-          b.balance
-        )
-        // Old data could hold a double-booking; import cancelled or clashing
-        // cars as inactive rather than failing the whole import.
-        const active = b.status !== "cancelled"
-        b.cars.forEach((c, i) => {
-          const clash =
-            active &&
-            db.prepare("SELECT 1 FROM booking_cars WHERE active = 1 AND hire_date = ? AND car_id = ?").get(b.date, c.carId)
-          db.prepare(
-            `INSERT OR IGNORE INTO booking_cars (booking_id, position, car_id, car_name, rate, fleet, owner_name,
-               owner_cost, driver_id, pickup_time, pickup_loc, stops, drop_time, drop_loc, hire_date, active)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`
-          ).run(
-            b.id,
-            i,
-            c.carId,
-            c.carName,
-            c.rate,
-            c.fleet ?? null,
-            c.ownerName ?? null,
-            c.ownerCost ?? null,
-            c.pickupTime ?? "",
-            c.pickupLoc ?? "",
-            JSON.stringify(c.stops ?? []),
-            c.dropTime ?? "",
-            c.dropLoc ?? "",
-            b.date,
-            active && !clash ? 1 : 0
-          )
-        })
-      }
-      for (const e of payload.ledger ?? []) {
-        db.prepare(
-          "INSERT OR IGNORE INTO ledger (id, booking_id, kind, category, note, amount, date, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM bookings WHERE id = ?)"
-        ).run(e.id, e.bookingId, e.kind, e.category, e.note ?? "", e.amount, e.date, e.createdAt, e.bookingId)
-      }
-      if (payload.settings) kvSet("settings", JSON.stringify({ ...DEFAULT_SETTINGS, ...upgradeSettings(payload.settings) }))
-    } else {
-      for (const c of DEMO_CARS) writeCar(c.id, c)
+export async function initializeFrom(payload: ImportPayload | null) {
+  return tx(async (db) => {
+    // Lock the flag row so two first-runs can't both import.
+    await db.query("INSERT INTO kv (key, value) VALUES ('initializing', '1') ON CONFLICT (key) DO NOTHING")
+    await db.query("SELECT value FROM kv WHERE key = 'initializing' FOR UPDATE")
+    const done = await db.query("SELECT 1 FROM kv WHERE key = 'initialized' AND value = '1'")
+    if (done.rowCount) return { imported: false }
+
+    const cars = payload?.cars ?? (payload ? [] : DEMO_CARS)
+    if (cars.length) {
+      await db.query(
+        `INSERT INTO cars (${CAR_COLUMNS})
+         SELECT r.id, r.name, r.color, r.hex, r.style, r.plate, r.rate, r.image, r.fleet, r.owner_name, r.owner_phone, r.owner_cost
+         FROM jsonb_to_recordset($1::jsonb) AS r(id text, name text, color text, hex text, style text, plate text,
+           rate int, image text, fleet text, owner_name text, owner_phone text, owner_cost int)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          JSON.stringify(
+            cars.map((c) => {
+              const [id, name, color, hex, style, plate, rate, image, fleet, owner_name, owner_phone, owner_cost] =
+                carValues(c.id, c)
+              return { id, name, color, hex, style, plate, rate, image, fleet, owner_name, owner_phone, owner_cost }
+            })
+          ),
+        ]
+      )
     }
-    kvSet("initialized", "1")
+
+    const bookings = (payload?.bookings ?? []).map(upgradeBooking)
+    if (bookings.length) {
+      await db.query(
+        `INSERT INTO bookings (id, inv_no, created_at, updated_at, revision, status, date, type, customer, phone, address,
+           deco, rate, deco_cost, total, advance, balance)
+         SELECT r.id, r.inv_no, r.created_at, r.updated_at, r.revision, r.status, r.date, r.type, r.customer, r.phone,
+           r.address, r.deco, r.rate, r.deco_cost, r.total, r.advance, r.balance
+         FROM jsonb_to_recordset($1::jsonb) AS r(id text, inv_no text, created_at timestamptz, updated_at timestamptz,
+           revision int, status text, date date, type text, customer text, phone text, address text, deco text,
+           rate int, deco_cost int, total int, advance int, balance int)
+         ON CONFLICT DO NOTHING`,
+        [
+          JSON.stringify(
+            bookings.map((b) => ({
+              id: b.id,
+              inv_no: b.invNo,
+              created_at: b.createdAt,
+              updated_at: b.updatedAt ?? null,
+              revision: b.revision ?? 1,
+              status: b.status,
+              date: b.date,
+              type: b.type,
+              customer: b.customer,
+              phone: b.phone,
+              address: b.address ?? "",
+              deco: b.deco,
+              rate: b.rate,
+              deco_cost: b.decoCost,
+              total: b.total,
+              advance: b.advance,
+              balance: b.balance,
+            }))
+          ),
+        ]
+      )
+      // Old data could hold a double-booking; import clashing cars as inactive
+      // rather than failing the whole import.
+      const taken = new Set<string>()
+      const carRows = bookings.flatMap((b) =>
+        b.cars.map((c, i) => {
+          const key = `${c.carId}|${b.date}`
+          const active = b.status !== "cancelled" && !taken.has(key)
+          if (active) taken.add(key)
+          return {
+            booking_id: b.id,
+            position: i,
+            car_id: c.carId,
+            car_name: c.carName,
+            rate: c.rate,
+            fleet: c.fleet === "partner" ? "partner" : null,
+            owner_name: c.ownerName ?? null,
+            owner_cost: c.ownerCost ?? null,
+            pickup_time: c.pickupTime ?? "",
+            pickup_loc: c.pickupLoc ?? "",
+            stops: c.stops ?? [],
+            drop_time: c.dropTime ?? "",
+            drop_loc: c.dropLoc ?? "",
+            hire_date: b.date,
+            active,
+          }
+        })
+      )
+      await db.query(
+        `INSERT INTO booking_cars (booking_id, position, car_id, car_name, rate, fleet, owner_name, owner_cost, driver_id,
+           pickup_time, pickup_loc, stops, drop_time, drop_loc, hire_date, active)
+         SELECT r.booking_id, r.position, r.car_id, r.car_name, r.rate, r.fleet, r.owner_name, r.owner_cost, NULL,
+           r.pickup_time, r.pickup_loc, r.stops, r.drop_time, r.drop_loc, r.hire_date, r.active
+         FROM jsonb_to_recordset($1::jsonb) AS r(booking_id text, position int, car_id text, car_name text, rate int,
+           fleet text, owner_name text, owner_cost int, pickup_time text, pickup_loc text, stops jsonb, drop_time text,
+           drop_loc text, hire_date date, active boolean)
+         WHERE EXISTS (SELECT 1 FROM bookings WHERE id = r.booking_id)
+         ON CONFLICT DO NOTHING`,
+        [JSON.stringify(carRows)]
+      )
+    }
+
+    const ledger = payload?.ledger ?? []
+    if (ledger.length) {
+      await db.query(
+        `INSERT INTO ledger (id, booking_id, kind, category, note, amount, date, created_at)
+         SELECT r.id, r.booking_id, r.kind, r.category, r.note, r.amount, r.date, r.created_at
+         FROM jsonb_to_recordset($1::jsonb) AS r(id text, booking_id text, kind text, category text, note text,
+           amount int, date date, created_at timestamptz)
+         WHERE EXISTS (SELECT 1 FROM bookings WHERE id = r.booking_id)
+         ON CONFLICT DO NOTHING`,
+        [
+          JSON.stringify(
+            ledger.map((e) => ({
+              id: e.id,
+              booking_id: e.bookingId,
+              kind: e.kind,
+              category: e.category,
+              note: e.note ?? "",
+              amount: e.amount,
+              date: e.date,
+              created_at: e.createdAt,
+            }))
+          ),
+        ]
+      )
+    }
+
+    if (payload?.settings) {
+      await db.query(
+        "INSERT INTO kv (key, value) VALUES ('settings', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        [JSON.stringify({ ...DEFAULT_SETTINGS, ...upgradeSettings(payload.settings) })]
+      )
+    }
+    await db.query("INSERT INTO kv (key, value) VALUES ('initialized', '1') ON CONFLICT (key) DO UPDATE SET value = '1'")
     return { imported: !!payload }
   })
 }
 
 // Development convenience: the test driver from the brief. Never runs in
 // production; the password is stored hashed like any other.
+let devDriverChecked = false
 export async function ensureDevDriver() {
-  if (process.env.NODE_ENV === "production" || kvGet("dev_driver_seeded") === "1") return
-  if (!db.prepare("SELECT 1 FROM users WHERE email = ?").get("driver@gmail.com")) {
+  if (process.env.NODE_ENV === "production" || devDriverChecked) return
+  const [seeded] = await q("SELECT 1 AS ok FROM kv WHERE key = 'dev_driver_seeded'")
+  if (!seeded) {
     const hash = await hashPassword("11111")
-    db.prepare(
-      "INSERT INTO users (id, name, email, phone, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, 'driver', 'active', ?, ?)"
-    ).run("drv-test", "Test Driver", "driver@gmail.com", "", hash, new Date().toISOString())
+    await q(
+      `INSERT INTO users (id, name, email, phone, role, status, password_hash)
+       VALUES ('drv-test', 'Test Driver', 'driver@gmail.com', '', 'driver', 'active', $1)
+       ON CONFLICT DO NOTHING`,
+      [hash]
+    )
+    await q("INSERT INTO kv (key, value) VALUES ('dev_driver_seeded', '1') ON CONFLICT (key) DO NOTHING")
   }
-  kvSet("dev_driver_seeded", "1")
-}
-
-// Photo, plate and look of the given cars, for the driver's hire cards.
-export function getCarInfo(ids: string[]) {
-  if (!ids.length) return {}
-  const rows = db
-    .prepare(`SELECT id, name, hex, style, image, plate FROM cars WHERE id IN (${ids.map(() => "?").join(",")})`)
-    .all(...ids) as Row[]
-  return Object.fromEntries(
-    rows.map((r) => [
-      String(r.id),
-      { name: String(r.name), hex: String(r.hex), style: r.style as Car["style"], image: str(r.image), plate: String(r.plate ?? "") },
-    ])
-  )
+  devDriverChecked = true
 }

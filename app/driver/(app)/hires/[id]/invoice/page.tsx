@@ -12,7 +12,7 @@ import { getDriverHire, getInvoiceSettings } from "@/lib/server/repo"
 export default async function DriverInvoicePage({ params }: PageProps<"/driver/hires/[id]/invoice">) {
   const driver = await driverPage()
   const { id } = await params
-  const hire = getDriverHire(driver.id, id)
+  const hire = await getDriverHire(driver.id, id)
   if (!hire) notFound()
   // The invoice shows the whole hire as billed; strip the driver-only field.
   const { myCars: _mine, ...booking } = hire
@@ -27,7 +27,7 @@ export default async function DriverInvoicePage({ params }: PageProps<"/driver/h
         </Link>
       </Button>
       <h1 className="text-2xl font-bold tracking-tight">Invoice {hire.invNo}</h1>
-      <InvoicePreview booking={booking} settings={getInvoiceSettings()} />
+      <InvoicePreview booking={booking} settings={await getInvoiceSettings()} />
     </>
   )
 }

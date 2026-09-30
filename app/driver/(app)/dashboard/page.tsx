@@ -10,10 +10,10 @@ import { todayInBusinessTz } from "@/lib/server/today"
 export default async function DriverDashboard() {
   const driver = await driverPage()
   const today = todayInBusinessTz()
-  const hires = getDriverHires(driver.id, today).sort((a, b) =>
+  const hires = (await getDriverHires(driver.id, today)).sort((a, b) =>
     (a.date + startTime(a)).localeCompare(b.date + startTime(b))
   )
-  const cars = getCarInfo([...new Set(hires.flatMap((h) => h.myCars.map((c) => c.carId)))])
+  const cars = await getCarInfo([...new Set(hires.flatMap((h) => h.myCars.map((c) => c.carId)))])
   const todays = hires.filter((h) => h.date === today)
   const upcoming = hires.filter((h) => h.date > today)
 

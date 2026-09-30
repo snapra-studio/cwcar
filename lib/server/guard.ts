@@ -25,7 +25,7 @@ export async function currentSession(): Promise<Session | null> {
 // a deactivated account loses access straight away.
 async function activeDriver(session: Session | null): Promise<Driver | null> {
   if (session?.role !== "driver") return null
-  const d = getDriver(session.sub)
+  const d = await getDriver(session.sub)
   return d && d.status === "active" ? d : null
 }
 

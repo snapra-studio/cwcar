@@ -24,8 +24,8 @@ export async function POST(request: Request) {
   }
   try {
     const local = body.local && typeof body.local === "object" ? (body.local as Parameters<typeof initializeFrom>[0]) : null
-    const result = initializeFrom(local)
-    return NextResponse.json({ ...result, state: getAdminState() })
+    const result = await initializeFrom(local)
+    return NextResponse.json({ ...result, state: await getAdminState() })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: "Could not import this browser's data." }, { status: 500 })
