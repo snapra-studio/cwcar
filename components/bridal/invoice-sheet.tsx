@@ -93,26 +93,19 @@ function Rows({
   rows,
   labelWidth,
   rowHeight,
-  underline,
 }: {
   rows: [string, string][]
   labelWidth: number
   rowHeight: number
-  underline?: boolean
 }) {
   return (
     <div className="grid" style={{ gridTemplateColumns: `${labelWidth}px 1fr` }}>
       {rows.map(([k, v]) => (
         <React.Fragment key={k}>
-          <div
-            className={cn("font-bold", underline && "underline underline-offset-2")}
-            style={{ height: rowHeight }}
-          >
+          <div className="font-bold" style={{ height: rowHeight }}>
             {k}
           </div>
-          <div className={cn(underline && "underline underline-offset-2")} style={{ height: rowHeight }}>
-            : {v}
-          </div>
+          <div style={{ height: rowHeight }}>: {v}</div>
         </React.Fragment>
       ))}
     </div>
@@ -195,13 +188,12 @@ export function InvoiceSheet({
       </div>
 
       {/* Bill to */}
-      <div style={{ marginTop: 14, marginLeft: 29 }} className="text-[15px] leading-[22px] font-bold underline underline-offset-2">
+      <div style={{ marginTop: 14, marginLeft: 29 }} className="text-[15px] leading-[22px] font-bold">
         Bill To:
       </div>
       <div className="flex leading-[26px]" style={{ marginLeft: 44 }}>
         <div style={{ width: 369 }}>
           <Rows
-            underline
             labelWidth={158}
             rowHeight={26}
             rows={[
@@ -221,11 +213,11 @@ export function InvoiceSheet({
               ] as const
             ).map(([k, v]) => (
               <React.Fragment key={k}>
-                <div className="font-bold underline underline-offset-2">{k}</div>
-                <div className="underline underline-offset-2">: {v}</div>
+                <div className="font-bold">{k}</div>
+                <div>: {v}</div>
               </React.Fragment>
             ))}
-            <div className="font-bold underline underline-offset-2">Email</div>
+            <div className="font-bold">Email</div>
             <div />
           </div>
         </div>
