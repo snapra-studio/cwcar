@@ -1,0 +1,115 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Light beige palette with warm caramel/brown accents, matching the
+   Crish Wedding Hires invoice. The app always renders light. */
+:root {
+  color-scheme: light;
+  --background: #f6efe4;
+  --foreground: #3f2a17;
+  --card: #fdf9f3;
+  --card-foreground: #3f2a17;
+  --popover: #fdf9f3;
+  --popover-foreground: #3f2a17;
+  --primary: #a8703e;
+  --primary-foreground: #ffffff;
+  --secondary: #ede2d2;
+  --secondary-foreground: #3f2a17;
+  --muted: #efe6d8;
+  --muted-foreground: #7a6149;
+  --accent: #eadcc7;
+  --accent-foreground: #3f2a17;
+  --destructive: #b91c1c;
+  --border: #e3d4bf;
+  --input: #d9c7ae;
+  --ring: rgb(168 112 62 / 55%);
+  --chart-1: #a8703e;
+  --chart-2: #c48c5a;
+  --chart-3: #d9b58c;
+  --chart-4: #8a6a4d;
+  --chart-5: #5c4128;
+  --radius: 0.9rem;
+  --sidebar: #efe5d6;
+  --sidebar-foreground: #3f2a17;
+  --sidebar-primary: #a8703e;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e5d6c0;
+  --sidebar-accent-foreground: #3f2a17;
+  --sidebar-border: #dfcfb8;
+  --sidebar-ring: rgb(168 112 62 / 55%);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+/* Slow drift on the landing background photo. */
+@keyframes kenburns {
+  from {
+    transform: scale(1.02) translate3d(0, 0, 0);
+  }
+  to {
+    transform: scale(1.12) translate3d(-1.5%, -1%, 0);
+  }
+}
+
+@utility animate-kenburns {
+  animation: kenburns 32s ease-in-out infinite alternate;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
