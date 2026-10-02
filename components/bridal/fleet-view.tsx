@@ -1,13 +1,14 @@
 "use client"
 
 import * as React from "react"
-import { FileTextIcon, ImagePlusIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { CropIcon, FileTextIcon, ImagePlusIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { CarPhoto, Swatch } from "@/components/bridal/car-art"
 import { CarExpensesDialog } from "@/components/bridal/car-expenses-dialog"
 import { ConfirmAction } from "@/components/bridal/confirm-action"
 import { ExpiryWarning, FilesDialog } from "@/components/bridal/files-dialog"
+import { PhotoEditor, type PhotoSource } from "@/components/bridal/photo-editor"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -95,6 +96,60 @@ export function PhotoPicker({
       <Button type="button" disabled={busy} onClick={() => inputRef.current?.click()} {...props}>
         {children}
       </Button>
+    </>
+  )
+}
+
+// "Add/Change photo" (choose a file, then crop it) and "Edit photo" (re-crop
+// the current one) for car photos. The editor saves exactly what is in its
+// 16:10 frame, the shape of the fleet cards.
+function CarPhotoButtons({
+  image,
+  onSave,
+  size = "sm",
+  addLabel,
+}: {
+  image?: string
+  onSave: (image: string) => void | Promise<void>
+  size?: "sm" | "default"
+  addLabel: string
+}) {
+  const inputRef = React.useRef<HTMLInputElement>(null)
+  const [source, setSource] = React.useState<PhotoSource | null>(null)
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ""
+          if (!file) return
+          if (!file.type.startsWith("image/")) return void toast.error("Choose a photo (JPG, PNG or WebP).")
+          setSource(file)
+        }}
+      />
+      <Button type="button" size={size} variant="outline" className="rounded-full" onClick={() => inputRef.current?.click()}>
+        <ImagePlusIcon data-icon="inline-start" />
+        {image ? "Change photo" : addLabel}
+      </Button>
+      {image && (
+        <Button type="button" size={size} variant="outline" className="rounded-full" onClick={() => setSource(image)}>
+          <CropIcon data-icon="inline-start" />
+          Edit photo
+        </Button>
+      )}
+      <PhotoEditor
+        source={source}
+        title={typeof source === "string" ? "Edit photo" : "Crop the new photo"}
+        onCancel={() => setSource(null)}
+        onSave={async (img) => {
+          await onSave(img)
+          setSource(null)
+        }}
+      />
     </>
   )
 }
@@ -230,15 +285,7 @@ function FleetCard({ car: c, nextHire }: { car: Car; nextHire?: string }) {
             </div>
           </div>
           <div className="flex flex-wrap justify-end gap-1.5">
-            <PhotoPicker
-              variant="outline"
-              size="sm"
-              className="rounded-full"
-              onPick={(image) => saveImage(c.id, image)}
-            >
-              <ImagePlusIcon data-icon="inline-start" />
-              {c.image ? "Change photo" : "Add photo"}
-            </PhotoPicker>
+            <CarPhotoButtons image={c.image} addLabel="Add photo" onSave={(image) => saveImage(c.id, image)} />
             {c.image && (
               <Button
                 variant="ghost"
@@ -517,15 +564,13 @@ function CarForm({
               <div className="group/photo grid gap-3 sm:grid-cols-[240px_1fr] sm:items-center">
                 <CarPhoto car={{ ...car, name: car.name || "New car" }} sizes="240px" className="rounded-xl" />
                 <div className="grid gap-2">
-                  <div className="flex gap-2">
-                    <PhotoPicker
-                      variant="outline"
-                      className="rounded-full"
-                      onPick={(image) => setCar((c) => ({ ...c, image }))}
-                    >
-                      <ImagePlusIcon data-icon="inline-start" />
-                      {car.image ? "Change photo" : "Upload photo"}
-                    </PhotoPicker>
+                  <div className="flex flex-wrap gap-2">
+                    <CarPhotoButtons
+                      image={car.image}
+                      size="default"
+                      addLabel="Upload photo"
+                      onSave={(image) => setCar((c) => ({ ...c, image }))}
+                    />
                     {car.image && (
                       <Button
                         type="button"
@@ -538,7 +583,8 @@ function CarForm({
                     )}
                   </div>
                   <FieldDescription>
-                    Optional. Without a photo we show a drawing in the car&apos;s colour.
+                    Optional. After choosing a photo you can move, zoom, rotate and crop it. Without a photo we show a
+                    drawing in the car&apos;s colour.
                   </FieldDescription>
                 </div>
               </div>

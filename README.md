@@ -96,6 +96,27 @@ a newer reel at most every 30 minutes. To also check while nobody visits, set
 `Authorization: Bearer <CRON_SECRET>` on a schedule. Uploading a video on
 Home overrides the reels until **Use Facebook reels** is pressed.
 
+## Google reviews on the public page
+
+The **Reviews** section on `/availability` always links to the Google
+Business Profile ("Write a review" and "Read our reviews on Google"). To also
+show the star rating, review count and latest reviews
+(`lib/server/google-reviews.ts`):
+
+1. In Google Cloud Console create a project, enable **Places API (New)**, and
+   create an **API key**. Restrict it to that API.
+2. Add to `.env.local` and restart the server:
+
+   ```
+   GOOGLE_PLACES_API_KEY=<your key>
+   ```
+
+The business is found by name the first time; set `GOOGLE_PLACE_ID` if the
+wrong place is picked. Reviews are refreshed every 12 hours, so only about two
+Google requests are made per day. Google returns up to 5 reviews and chooses
+which ones; the page shows them unedited, with the reviewer's name and
+"Reviews from Google".
+
 ## Moving data from the old SQLite file
 
 Earlier versions kept data in `data/cwcar.db`. To copy it into an empty

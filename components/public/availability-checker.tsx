@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import Image from "next/image"
-import { Inter_Tight } from "next/font/google"
 import {
   ArrowUpRightIcon,
   CheckIcon,
@@ -18,6 +17,8 @@ import {
 
 import { CarPhoto } from "@/components/bridal/car-art"
 import { CinematicFilm, FilmNav } from "@/components/public/cinematic-film"
+import { display } from "@/components/public/fonts"
+import { GoogleReviewsSection } from "@/components/public/google-reviews"
 import { Parallax, Reveal, Sparkle } from "@/components/public/motion"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MONTHS, fmtDate, pad, parseIso, toIso } from "@/lib/bridal/format"
@@ -34,7 +35,6 @@ import { cn } from "@/lib/utils"
 // a scattered fleet gallery that drifts on scroll, the availability filters,
 // the calendar and contact.
 
-const display = Inter_Tight({ subsets: ["latin"], weight: ["400", "500", "600"] })
 
 type PublicCar = { id: string; name: string; color: string; hex: string; style: CarStyle; image?: string }
 type Business = { name: string; phone: string; email: string; address: string }
@@ -566,6 +566,8 @@ export function AvailabilityChecker({ today }: { today: string }) {
             </Reveal>
           </div>
         </section>
+
+        <GoogleReviewsSection />
 
         <Contact business={business} bizName={bizName} />
       </main>

@@ -2,17 +2,15 @@
 
 import * as React from "react"
 import Image from "next/image"
-import { Cormorant_Garamond } from "next/font/google"
 import { ArrowRightIcon, PhoneIcon } from "lucide-react"
 
+import { serif } from "@/components/public/fonts"
 import { cn } from "@/lib/utils"
 
 // The opening of the public page: one full screen of the decorated car
 // driving slowly (the uploaded video or newest Facebook reel), with the
 // "Find your date" message on the left. Without a video, the landing photo
 // drifts slowly instead (and a warm gradient if there's no photo either).
-
-export const serif = Cormorant_Garamond({ subsets: ["latin"], weight: ["300", "400", "500"] })
 
 const tel = (p: string) => `tel:${p.replace(/\s/g, "")}`
 
@@ -176,13 +174,16 @@ export function FilmNav({ bizName }: { bizName: string }) {
           <a href="#availability" className={link}>
             Availability
           </a>
+          <a href="#calendar" className={cn(link, "md:hidden lg:block")}>
+            Calendar
+          </a>
         </div>
         <a href="#top" aria-label={`${wordmark(bizName)} — back to top`} className="block">
           <Image src="/logo.png" alt={wordmark(bizName)} width={160} height={160} priority className="h-20 w-auto drop-shadow-[0_0_14px_rgba(255,236,200,0.35)] sm:h-24" />
         </a>
         <div className="flex items-center justify-end gap-8">
-          <a href="#calendar" className={link}>
-            Calendar
+          <a href="#reviews" className={link}>
+            Reviews
           </a>
           <a href="#contact" className={link}>
             Contact
