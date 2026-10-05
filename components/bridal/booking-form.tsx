@@ -98,7 +98,7 @@ export function BookingForm(props: FormProps) {
           <EmptyHeader>
             <EmptyTitle>Booking not found</EmptyTitle>
             <EmptyDescription>
-              It may have been saved on another device. <Link href="/dashboard/history">Back to history</Link>
+              It may have been saved on another device. <Link href="/admin/dashboard/history">Back to history</Link>
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -364,7 +364,7 @@ function BookingFormInner({
                 </Field>
                 {cars.length === 0 ? (
                   <FieldDescription>
-                    No cars yet. <Link href="/dashboard/cars">Add a car</Link> first.
+                    No cars yet. <Link href="/admin/dashboard/cars">Add a car</Link> first.
                   </FieldDescription>
                 ) : (
                   <>
@@ -654,7 +654,7 @@ function BookingFormInner({
                 </Button>
                 {editing ? (
                   <Button asChild size="lg" variant="outline" className="rounded-full px-5">
-                    <Link href="/dashboard/history">Cancel</Link>
+                    <Link href="/admin/dashboard/history">Cancel</Link>
                   </Button>
                 ) : (
                   <Button type="button" size="lg" variant="outline" className="rounded-full px-5" onClick={reset}>
@@ -720,7 +720,7 @@ function BookingFormInner({
           if (open) return
           setInvoice(null)
           // After re-issuing an edited invoice, go back to the booking list.
-          if (editing) router.push("/dashboard/history")
+          if (editing) router.push("/admin/dashboard/history")
         }}
       />
     </div>
@@ -804,7 +804,7 @@ function RouteEditor({
         </NativeSelect>
         {drivers.length === 0 && (
           <FieldDescription>
-            No drivers yet. <Link href="/dashboard/drivers">Add a driver</Link>.
+            No drivers yet. <Link href="/admin/dashboard/drivers">Add a driver</Link>.
           </FieldDescription>
         )}
       </Field>

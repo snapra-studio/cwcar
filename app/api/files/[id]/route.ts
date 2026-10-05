@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import type { FileMeta } from "@/lib/bridal/types"
 import { q } from "@/lib/server/db"
 import { getFile } from "@/lib/server/files"
-import { currentSession } from "@/lib/server/guard"
+import { activeAdmin, currentSession } from "@/lib/server/guard"
 import { getDriver } from "@/lib/server/repo"
 import { getObject } from "@/lib/server/storage"
 
@@ -19,7 +19,7 @@ const PUBLIC: FileMeta["ownerType"][] = ["car_image", "cover", "cover_video"]
 async function canRead(meta: FileMeta) {
   if (PUBLIC.includes(meta.ownerType)) return true
   const session = await currentSession()
-  if (session?.role === "admin") return true
+  if (session?.role === "admin") return !!(await activeAdmin(session))
   if (session?.role === "driver" && meta.ownerType === "booking") {
     const driver = await getDriver(session.sub)
     if (driver?.status !== "active") return false

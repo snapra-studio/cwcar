@@ -36,11 +36,12 @@ The database tables are created automatically on the first request
 
 | URL | Who | |
 | --- | --- | --- |
-| `/login` → `/dashboard/*` | Admin | Everything |
+| `/admin` → `/admin/login` → `/admin/dashboard/*` | Admins (email + Google Authenticator code) | Everything; the super admin also manages admins |
 | `/driver/login` → `/driver/dashboard` | Drivers | Only hires assigned to them, read-only invoice |
-| `/availability` | Anyone | Which cars are free on a date; no private details |
+| `/` (home page) | Anyone | The customer website: fleet, which cars are free on a date, reviews, contact; no private details |
 
-Drivers are added by the admin on `/dashboard/drivers`.
+Drivers are added by the admin on `/admin/dashboard/drivers`. Old addresses
+(`/availability`, `/dashboard/*`, `/login`) redirect to the new ones.
 
 ## Code map
 
@@ -69,9 +70,48 @@ checks access before streaming the file:
 
 Uploads are checked by content (photo, PDF, Word, Excel), up to 15 MB.
 
+## Admin sign-in and admin accounts
+
+Admins sign in with their **email and the 6-digit code from Google
+Authenticator**. There are no admin passwords (`lib/server/admins.ts`,
+`lib/server/totp.ts`). Drivers still use email + password.
+
+**First time:** open `/admin`. It asks once for the old `ADMIN_EMAIL` /
+`ADMIN_PASSWORD` from `.env.local`, then shows a QR code to scan with Google
+Authenticator. That account becomes the **super admin** and gets 8 one-time
+recovery codes; save them away from the phone. After this, `ADMIN_PASSWORD`
+is no longer used and can be removed.
+
+**Adding admins** (super admin: shield icon in the top bar → *Admins*): enter
+a name and email and pick the role (*Admin* or *Super admin*) → they get an
+email with a setup link (valid 3 days, works once) → they scan the QR code →
+they show as *Waiting for approval* and every super admin gets an email →
+*Approve*. You can also suspend, turn back on, reset someone's authenticator
+(lost phone: they get a new link and need approval again), make them a super
+admin or a regular admin again, or remove them. There can be several super
+admins; nobody can change their own account, so one always remains. Every
+admin can *Move to a new phone* on the same page.
+
+**Email (SMTP)**: add to `.env.local` and restart:
+
+```
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587            # 465 for SSL
+SMTP_USER=...
+SMTP_PASS=...
+SMTP_FROM="Chrish Wedding Cars <no-reply@yourdomain.com>"
+APP_URL=https://yourdomain.com   # used for the links inside emails
+```
+
+Without SMTP, inviting still works: you get the setup link to send yourself.
+
+Authenticator secrets are encrypted with a key made from `AUTH_SECRET` (or
+`TOTP_KEY` if set). Changing that value means every admin has to set up the
+app again.
+
 ## Facebook reels as the public page video
 
-The film at the top of `/availability` can play the newest reel from the
+The film at the top of the home page (`/`) can play the newest reel from the
 Facebook page automatically (`lib/server/facebook.ts`). The site copies the
 reel into file storage, so it keeps playing even if Facebook is unreachable.
 
@@ -98,7 +138,7 @@ Home overrides the reels until **Use Facebook reels** is pressed.
 
 ## Google reviews on the public page
 
-The **Reviews** section on `/availability` always links to the Google
+The **Reviews** section on the home page always links to the Google
 Business Profile ("Write a review" and "Read our reviews on Google"). To also
 show the star rating, review count and latest reviews
 (`lib/server/google-reviews.ts`):

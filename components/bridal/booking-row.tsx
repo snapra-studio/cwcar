@@ -104,7 +104,7 @@ export function BookingRow({
         </Button>
         {b.status !== "cancelled" && (
           <Button size="sm" variant="outline" asChild>
-            <Link href={`/dashboard/bookings/${b.id}/edit`}>
+            <Link href={`/admin/dashboard/bookings/${b.id}/edit`}>
               <PencilIcon data-icon="inline-start" />
               Edit
             </Link>
@@ -112,7 +112,7 @@ export function BookingRow({
         )}
         {b.status !== "cancelled" && (
           <Button size="sm" variant="outline" asChild>
-            <Link href={`/dashboard/finance?hire=${encodeURIComponent(b.id)}`}>
+            <Link href={`/admin/dashboard/finance?hire=${encodeURIComponent(b.id)}`}>
               <WalletIcon data-icon="inline-start" />
               Income &amp; expenses
             </Link>

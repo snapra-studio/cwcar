@@ -105,7 +105,7 @@ function Landing() {
             </p>
             <div className="flex flex-wrap gap-3">
               <Button asChild size="lg" className="h-11 rounded-full px-6 text-sm shadow-lg shadow-black/30">
-                <Link href="/dashboard/bookings/new">
+                <Link href="/admin/dashboard/bookings/new">
                   New booking
                   <ArrowRightIcon data-icon="inline-end" />
                 </Link>
@@ -116,7 +116,7 @@ function Landing() {
                 variant="outline"
                 className="h-11 rounded-full border-white/40 bg-white/10 px-6 text-sm text-white backdrop-blur-md hover:bg-white/20 hover:text-white"
               >
-                <Link href="/dashboard/availability">Check availability</Link>
+                <Link href="/admin/dashboard/availability">Check availability</Link>
               </Button>
               <Button
                 asChild
@@ -125,7 +125,7 @@ function Landing() {
                 className="h-11 rounded-full px-4 text-sm text-white/85 hover:bg-white/10 hover:text-white"
               >
                 {/* The page customers use; share this link with them. */}
-                <Link href="/availability" target="_blank">
+                <Link href="/" target="_blank">
                   Public availability page ↗
                 </Link>
               </Button>
@@ -148,7 +148,7 @@ function Landing() {
               aria-label="Sections"
               className="grid animate-in grid-cols-2 gap-3 delay-300 duration-700 fade-in fill-mode-both slide-in-from-bottom-4 sm:grid-cols-3 xl:grid-cols-5"
             >
-              {NAV_ITEMS.filter((i) => i.url !== "/dashboard").map((item) => (
+              {NAV_ITEMS.filter((i) => i.url !== "/admin/dashboard").map((item) => (
                 <Link
                   key={item.url}
                   href={item.url}
@@ -226,7 +226,7 @@ function UpcomingPanel({ upcoming, onInvoice }: { upcoming: Booking[]; onInvoice
         <div className="grid justify-items-start gap-3 py-2 text-sm text-white/80">
           No upcoming hires yet.
           <Button asChild size="sm" className="rounded-full">
-            <Link href="/dashboard/bookings/new">New booking</Link>
+            <Link href="/admin/dashboard/bookings/new">New booking</Link>
           </Button>
         </div>
       ) : (
@@ -272,7 +272,7 @@ function UpcomingPanel({ upcoming, onInvoice }: { upcoming: Booking[]; onInvoice
           variant="outline"
           className="w-full rounded-full border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white"
         >
-          <Link href="/dashboard/history">
+          <Link href="/admin/dashboard/history">
             {upcoming.length > shown.length ? `See all ${upcoming.length} upcoming` : "Open history"}
             <ArrowRightIcon data-icon="inline-end" />
           </Link>

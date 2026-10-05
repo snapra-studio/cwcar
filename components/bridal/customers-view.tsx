@@ -109,7 +109,7 @@ export function CustomersView() {
                     <TableCell className="text-right tabular-nums">{rs(active.reduce((n, b) => n + b.total, 0))}</TableCell>
                     <TableCell>
                       <Link
-                        href={`/dashboard/bookings/${shown.id}/edit`}
+                        href={`/admin/dashboard/bookings/${shown.id}/edit`}
                         className="inline-flex flex-wrap items-center gap-1.5 hover:text-primary"
                       >
                         {fmtDate(shown.date)}

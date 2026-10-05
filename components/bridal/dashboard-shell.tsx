@@ -32,7 +32,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { error } = useBridal()
 
-  if (pathname === "/dashboard") {
+  if (pathname === "/admin/dashboard") {
     return (
       <div className="relative flex min-h-svh flex-col">
         <TopNav overlay />

@@ -303,7 +303,7 @@ function Availability() {
               </EmptyHeader>
               <EmptyContent>
                 <Button asChild size="sm">
-                  <Link href="/dashboard/cars">Add a car</Link>
+                  <Link href="/admin/dashboard/cars">Add a car</Link>
                 </Button>
               </EmptyContent>
             </Empty>
@@ -333,7 +333,7 @@ function Availability() {
                                 Invoice
                               </Button>
                               <Button size="xs" variant="outline" asChild>
-                                <Link href={`/dashboard/bookings/${x.booking.id}/edit`}>Edit</Link>
+                                <Link href={`/admin/dashboard/bookings/${x.booking.id}/edit`}>Edit</Link>
                               </Button>
                             </span>
                           </li>
@@ -406,7 +406,7 @@ function Availability() {
                     )}
                     {!past && gaps.length > 0 && (
                       <Button size="sm" asChild>
-                        <Link href={`/dashboard/bookings/new?date=${selDate}&car=${encodeURIComponent(car.id)}`}>Book</Link>
+                        <Link href={`/admin/dashboard/bookings/new?date=${selDate}&car=${encodeURIComponent(car.id)}`}>Book</Link>
                       </Button>
                     )}
                   </ItemActions>

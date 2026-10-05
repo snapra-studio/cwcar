@@ -1,11 +1,10 @@
 import Image from "next/image"
 import Link from "next/link"
 
-import { LoginForm } from "@/app/login/login-form"
 
-// Full-window login card on the fairy-light background, used by both the
-// admin login (/login) and the driver login (/driver/login).
-export function LoginScreen({ title, subtitle, next }: { title: string; subtitle: string; next?: string }) {
+// Full-window login card on the fairy-light background, used by the admin
+// login (/admin/login, setup) and the driver login (/driver/login).
+export function LoginScreen({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
     <main className="relative isolate grid min-h-svh place-items-center overflow-hidden p-4">
       <Image src="/landing-bg.svg" alt="" fill priority unoptimized sizes="100vw" className="-z-20 animate-kenburns object-cover" />
@@ -19,10 +18,10 @@ export function LoginScreen({ title, subtitle, next }: { title: string; subtitle
             <p className="text-sm text-muted-foreground">{subtitle}</p>
           </div>
         </div>
-        <LoginForm next={next} />
+        {children}
         <p className="mt-5 text-center text-sm text-muted-foreground">
           Looking for a car?{" "}
-          <Link href="/availability" className="font-medium text-primary hover:underline">
+          <Link href="/" className="font-medium text-primary hover:underline">
             Check availability
           </Link>
         </p>

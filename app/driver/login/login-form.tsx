@@ -3,14 +3,14 @@
 import * as React from "react"
 import { EyeIcon, EyeOffIcon, LogInIcon } from "lucide-react"
 
-import { login } from "@/app/login/actions"
+import { driverLogin } from "@/app/driver/login/actions"
 import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group"
 
 export function LoginForm({ next }: { next?: string }) {
-  const [state, action, pending] = React.useActionState(login, undefined)
+  const [state, action, pending] = React.useActionState(driverLogin, undefined)
   const [show, setShow] = React.useState(false)
 
   return (

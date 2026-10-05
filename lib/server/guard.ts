@@ -5,6 +5,7 @@ import { redirect } from "next/navigation"
 
 import { SESSION_COOKIE, readSession, type Session } from "@/lib/auth"
 import type { Driver } from "@/lib/bridal/types"
+import { getAdmin, type AdminView } from "@/lib/server/admins"
 import { getDriver } from "@/lib/server/repo"
 
 // Reusable authorization for server pages, server actions and route handlers.
@@ -29,11 +30,26 @@ async function activeDriver(session: Session | null): Promise<Driver | null> {
   return d && d.status === "active" ? d : null
 }
 
+// The signed-in admin, re-checked against the database on every request so
+// a suspended or removed admin loses access straight away.
+export async function activeAdmin(session: Session | null): Promise<AdminView | null> {
+  if (session?.role !== "admin") return null
+  const a = await getAdmin(session.sub)
+  return a && a.status === "active" ? a : null
+}
+
 // ---- For actions and API routes: throw, the caller turns it into an error. ----
 
-export async function requireAdmin(): Promise<void> {
-  const s = await currentSession()
-  if (s?.role !== "admin") throw new Forbidden()
+export async function requireAdmin(): Promise<AdminView> {
+  const a = await activeAdmin(await currentSession())
+  if (!a) throw new Forbidden()
+  return a
+}
+
+export async function requireSuperAdmin(): Promise<AdminView> {
+  const a = await requireAdmin()
+  if (a.role !== "super_admin") throw new Forbidden()
+  return a
 }
 
 export async function requireDriver(): Promise<Driver> {
@@ -44,15 +60,19 @@ export async function requireDriver(): Promise<Driver> {
 
 // ---- For server pages/layouts: redirect to the right login instead. ----
 
-export async function adminPage(): Promise<void> {
+export async function adminPage(): Promise<AdminView> {
   const s = await currentSession()
   if (s?.role === "driver") redirect("/driver/dashboard")
-  if (s?.role !== "admin") redirect("/login")
+  const a = await activeAdmin(s)
+  // An admin cookie for a suspended/removed account (or from before admin
+  // accounts existed): clear it, or the login page would bounce back here.
+  if (!a) redirect(s?.role === "admin" ? "/api/auth/signout?to=/admin/login" : "/admin/login")
+  return a
 }
 
 export async function driverPage(): Promise<Driver> {
   const s = await currentSession()
-  if (s?.role === "admin") redirect("/dashboard")
+  if (s?.role === "admin") redirect("/admin/dashboard")
   const d = await activeDriver(s)
   // A driver cookie for a switched-off or deleted account: clear it on the way
   // out, or the login page would send them straight back here.
