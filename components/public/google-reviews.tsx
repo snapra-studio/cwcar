@@ -96,12 +96,14 @@ export function GoogleReviewsSection() {
       <div className="mx-auto max-w-[88rem] rounded-[2rem] border border-black/[0.06] bg-white px-6 py-14 sm:px-12 sm:py-20">
         <div className="grid gap-10 *:min-w-0 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:items-end">
           <Reveal>
-            <p className={cn("mb-4 text-xs font-medium tracking-[0.3em] uppercase", MUTED)}>Google reviews</p>
-            <h2 id="reviews-title" className={cn(display.className, "text-[clamp(2.5rem,11vw,6.5rem)] leading-[0.92] font-medium tracking-[-0.045em]")}>
+            <h2 id="reviews-title" className={cn("mb-4 text-xs font-medium tracking-[0.3em] uppercase", MUTED)}>
+              Customer reviews on Google
+            </h2>
+            <p className={cn(display.className, "text-[clamp(2.5rem,11vw,6.5rem)] leading-[0.92] font-medium tracking-[-0.045em]")}>
               Loved on
               <br />
               <span className="text-black/30">their big day.</span>
-            </h2>
+            </p>
           </Reveal>
           <Reveal delay={100} className="grid gap-5 lg:justify-items-end lg:text-right">
             {data.rating ? (

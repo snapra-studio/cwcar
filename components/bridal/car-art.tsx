@@ -102,11 +102,17 @@ export function CarPhoto({
   className,
   sizes = "(min-width: 1024px) 33vw, 100vw",
   priority,
+  alt,
+  shade = true,
 }: {
   car: Pick<Car, "name" | "hex" | "style" | "image">
   className?: string
   sizes?: string
   priority?: boolean
+  // Descriptive text for search engines and screen readers (default: the name).
+  alt?: string
+  // The dark fade at the bottom (for captions laid over the photo).
+  shade?: boolean
 }) {
   return (
     <div
@@ -118,7 +124,7 @@ export function CarPhoto({
       {car.image ? (
         <Image
           src={car.image}
-          alt={car.name}
+          alt={alt ?? car.name}
           fill
           unoptimized
           sizes={sizes}
@@ -130,7 +136,7 @@ export function CarPhoto({
           <CarArt hex={car.hex} style={car.style} />
         </div>
       )}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-2/5 bg-linear-to-t from-black/70 to-transparent" />
+      {shade && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-2/5 bg-linear-to-t from-black/70 to-transparent" />}
     </div>
   )
 }

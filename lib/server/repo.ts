@@ -695,8 +695,10 @@ export async function getCarInfo(ids: string[]) {
 
 export type PublicCar = Pick<Car, "id" | "name" | "color" | "hex" | "style" | "image">
 
+// The public website shows our own fleet only: cars rented in from partner
+// owners (fleet = 'partner') are for the office, never listed to customers.
 export async function getPublicCars(): Promise<PublicCar[]> {
-  return (await q("SELECT id, name, color, hex, style, image FROM cars ORDER BY name")).map((r) => ({
+  return (await q("SELECT id, name, color, hex, style, image FROM cars WHERE fleet = 'own' ORDER BY name")).map((r) => ({
     id: String(r.id),
     name: String(r.name),
     color: String(r.color),
@@ -704,6 +706,26 @@ export async function getPublicCars(): Promise<PublicCar[]> {
     style: r.style as Car["style"],
     image: str(r.image),
   }))
+}
+
+// The public availability answer: is this (own-fleet) car free on this date,
+// for the whole day or, with from/to ("HH:MM"), for that time? Only yes/no
+// leaves the server; hires and unavailable periods stay private.
+// null = not one of our public cars.
+export async function isPublicCarFree(carId: string, date: string, from?: string, to?: string): Promise<boolean | null> {
+  const [r] = await q(
+    `WITH win AS (
+       SELECT CASE WHEN $3::text IS NULL THEN tsrange($2::date, $2::date + 1)
+                   ELSE tsrange($2::date + $3::time, $2::date + $4::time) END AS r
+     )
+     SELECT
+       EXISTS (SELECT 1 FROM cars WHERE id = $1 AND fleet = 'own') AS listed,
+       EXISTS (SELECT 1 FROM booking_cars bc, win WHERE bc.active AND bc.car_id = $1 AND bc.slot && win.r)
+         OR EXISTS (SELECT 1 FROM car_blocks cb, win WHERE cb.car_id = $1 AND tsrange(cb.start_at, cb.end_at) && win.r) AS busy`,
+    [carId, date, from ?? null, to ?? null]
+  )
+  if (!r?.listed) return null
+  return !r.busy
 }
 
 // Booked time slots (car + start/end only) overlapping the days from..to
