@@ -26,14 +26,6 @@ import {
 import type { CarStyle } from "@/lib/bridal/types"
 import { cn } from "@/lib/utils"
 
-// The customer website's home page (no login). Everything shown comes from
-// the server render (app/page.tsx): our own fleet — never partner cars — and
-// the public contact details. Availability is asked one car + one date at a
-// time and answered only "Available" / "Not available".
-//
-// Opens with a full-screen film of the decorated car (cinematic-film.tsx),
-// then the fleet gallery, "choose a car", the availability check, why us and
-// FAQ, Google reviews and contact.
 
 const FALLBACK_NAME = "Chrish Wedding Cars"
 
