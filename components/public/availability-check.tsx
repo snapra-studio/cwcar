@@ -10,10 +10,6 @@ import { MUTED, PILL_DARK, PILL_LIGHT, carAlt, tel, wa, type PublicCar } from "@
 import { MONTHS, fmtDate, pad, parseIso } from "@/lib/bridal/format"
 import { cn } from "@/lib/utils"
 
-// The customer's availability check: choose a car, then a date (and, if they
-// like, a time). The answer is only "Available" or "Not available" for that
-// car on that date — it comes from /api/availability, which never shares
-// other hires, times or cars. The month calendar is a plain date picker.
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 const toMin = (t: string) => (/^\d{2}:\d{2}$/.test(t) ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3)) : NaN)

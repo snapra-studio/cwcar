@@ -24,9 +24,6 @@ import {
 } from "@/components/public/site-parts"
 import { cn } from "@/lib/utils"
 
-// Customer pages for the fleet: /wedding-cars (all our cars) and
-// /wedding-cars/<car> (one car, with its own availability check).
-
 const STYLE_WORDS = { sedan: "luxury sedan", vintage: "vintage classic", suv: "SUV" } as const
 
 function Shell({ business, cars, today, children }: { business: PublicBusiness; cars: PublicCar[]; today: string; children: React.ReactNode }) {
