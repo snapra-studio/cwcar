@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation"
 import {
   CalendarDaysIcon,
   CarFrontIcon,
+  HandshakeIcon,
   HouseIcon,
   IdCardIcon,
   ListIcon,
@@ -48,6 +49,12 @@ export const NAV_ITEMS = [
   { title: "Cars", url: "/admin/dashboard/cars", icon: CarFrontIcon, description: "Our fleet and partner vehicles" },
   { title: "Drivers", url: "/admin/dashboard/drivers", icon: IdCardIcon, description: "Driver logins and assignments" },
   { title: "Customers", url: "/admin/dashboard/customers", icon: UsersIcon, description: "Everyone you have hired to" },
+  {
+    title: "Partner Inquiries",
+    url: "/admin/dashboard/partners",
+    icon: HandshakeIcon,
+    description: "B2B hire inquiries, partner prices and commission",
+  },
 ]
 
 const isActiveLink = (pathname: string, url: string) =>

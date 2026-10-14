@@ -41,6 +41,9 @@ export async function sendMail(mail: Mail): Promise<boolean> {
   }
 }
 
+// The public site address (for the logo in emails).
+const siteBase = () => (process.env.APP_URL || "https://www.chrishrentals.com").replace(/\/+$/, "")
+
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!)
 
 // A plain, personal-looking business email: a heading, short paragraphs, one
@@ -76,8 +79,9 @@ export async function layout({
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${esc(heading)}</title></head>
 <body style="margin:0;padding:24px 16px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#222222;font-size:15px;line-height:1.55">
 <div style="max-width:520px;margin:0 auto">
+<p style="margin:0 0 18px"><img src="${esc(siteBase())}/logo.png" width="72" height="72" alt="${esc(name)}" style="display:block;border:0"></p>
 <p style="margin:0 0 16px;font-size:20px;font-weight:bold;color:#16120e">${esc(heading)}</p>
-${lines.map((l) => `<p style="margin:0 0 14px">${esc(l)}</p>`).join("\n")}
+${lines.map((l) => `<p style="margin:0 0 14px">${esc(l).replace(/\n/g, "<br>")}</p>`).join("\n")}
 ${
   button
     ? `<p style="margin:22px 0"><a href="${esc(button.url)}" style="background:#16120e;color:#ffffff;text-decoration:none;padding:11px 20px;border-radius:6px;display:inline-block">${esc(button.label)}</a></p>

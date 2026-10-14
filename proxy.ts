@@ -6,6 +6,7 @@ import { SESSION_COOKIE, readSession } from "@/lib/auth"
 //   /                      public home page (customers), not matched here
 //   /admin, /admin/*       admin only
 //   /driver/* (not login)  drivers only
+//   /inquiry               public (hire partner inquiry page), not matched here
 //   /admin/login, /driver/login  signed-out visitors (signed-in users go to their area)
 //   /admin/setup           anyone with a valid setup link (checked by the page)
 // This check only reads the signed cookie. Server pages, actions and API
@@ -30,7 +31,7 @@ export function proxy(request: NextRequest) {
   const wants = pathname.startsWith("/driver") ? "driver" : "admin"
   if (session?.role !== wants) {
     if (home) return to(home)
-    const url = new URL(wants === "driver" ? "/driver/login" : "/admin/login", request.url)
+    const url = new URL(`/${wants === "admin" ? "admin" : wants}/login`, request.url)
     if (pathname !== "/admin" && pathname !== "/driver") url.searchParams.set("next", pathname + search)
     return NextResponse.redirect(url)
   }

@@ -40,6 +40,7 @@ export async function activeAdmin(session: Session | null): Promise<AdminView | 
 
 // ---- For actions and API routes: throw, the caller turns it into an error. ----
 
+
 export async function requireAdmin(): Promise<AdminView> {
   const a = await activeAdmin(await currentSession())
   if (!a) throw new Forbidden()
