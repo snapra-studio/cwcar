@@ -47,6 +47,7 @@ export type RatedCar = { carId: string; name: string; color: string; style: stri
 const ratesOf = (r: Row): PartnerRates => ({
   rate4h: num(r.rate_4h),
   rate8h: num(r.rate_8h),
+  rate10h: num(r.rate_10h),
   rate12h: num(r.rate_12h),
   baseOver12h: num(r.base_over_12h),
   hourlyOver12h: num(r.hourly_over_12h),
@@ -55,7 +56,7 @@ const ratesOf = (r: Row): PartnerRates => ({
 // Our own cars with their partner rates (cars without rates included).
 export async function listPartnerRates(): Promise<RatedCar[]> {
   const rows = await q(
-    `SELECT c.id, c.name, c.color, c.style, c.image, r.rate_4h, r.rate_8h, r.rate_12h, r.base_over_12h, r.hourly_over_12h, r.updated_at
+    `SELECT c.id, c.name, c.color, c.style, c.image, r.rate_4h, r.rate_8h, r.rate_10h, r.rate_12h, r.base_over_12h, r.hourly_over_12h, r.updated_at
      FROM cars c LEFT JOIN partner_rates r ON r.car_id = c.id
      WHERE c.fleet = 'own' ORDER BY c.name, c.color`
   )
@@ -70,14 +71,14 @@ export async function listPartnerRates(): Promise<RatedCar[]> {
   }))
 }
 
-async function ratesFor(carId: string): Promise<PartnerRates | null> {
+export async function ratesFor(carId: string): Promise<PartnerRates | null> {
   const [r] = await q("SELECT * FROM partner_rates WHERE car_id = $1", [carId])
   return r ? ratesOf(r) : null
 }
 
 const rateField = z.number().int("Use whole rupees.").min(0, "Prices can't be negative.").max(10_000_000).nullable()
 export const ratesSchema = z
-  .object({ rate4h: rateField, rate8h: rateField, rate12h: rateField, baseOver12h: rateField, hourlyOver12h: rateField })
+  .object({ rate4h: rateField, rate8h: rateField, rate10h: rateField, rate12h: rateField, baseOver12h: rateField, hourlyOver12h: rateField })
   .refine((r) => (r.baseOver12h == null) === (r.hourlyOver12h == null), {
     message: "For above 12 hours, set both the base rate and the extra hourly charge (or neither).",
   })
@@ -86,11 +87,11 @@ export async function saveRates(carId: string, rates: z.infer<typeof ratesSchema
   const [car] = await q("SELECT 1 FROM cars WHERE id = $1 AND fleet = 'own'", [carId])
   if (!car) throw new UserError("Partner rates can only be set for our own cars.")
   await q(
-    `INSERT INTO partner_rates (car_id, rate_4h, rate_8h, rate_12h, base_over_12h, hourly_over_12h, updated_at, updated_by)
-     VALUES ($1, $2, $3, $4, $5, $6, now(), $7)
-     ON CONFLICT (car_id) DO UPDATE SET rate_4h = $2, rate_8h = $3, rate_12h = $4, base_over_12h = $5,
-       hourly_over_12h = $6, updated_at = now(), updated_by = $7`,
-    [carId, rates.rate4h, rates.rate8h, rates.rate12h, rates.baseOver12h, rates.hourlyOver12h, actor]
+    `INSERT INTO partner_rates (car_id, rate_4h, rate_8h, rate_10h, rate_12h, base_over_12h, hourly_over_12h, updated_at, updated_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8)
+     ON CONFLICT (car_id) DO UPDATE SET rate_4h = $2, rate_8h = $3, rate_10h = $4, rate_12h = $5, base_over_12h = $6,
+       hourly_over_12h = $7, updated_at = now(), updated_by = $8`,
+    [carId, rates.rate4h, rates.rate8h, rates.rate10h, rates.rate12h, rates.baseOver12h, rates.hourlyOver12h, actor]
   )
 }
 

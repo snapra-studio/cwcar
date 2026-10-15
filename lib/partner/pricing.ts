@@ -5,7 +5,8 @@
 // Packages by hire duration (pick-up to drop-off):
 //   up to 4 h        -> rate_4h
 //   over 4 to 8 h    -> rate_8h
-//   over 8 to 12 h   -> rate_12h
+//   over 8 to 10 h   -> rate_10h
+//   over 10 to 12 h  -> rate_12h
 //   over 12 h        -> base_over_12h + each started hour after 12 × hourly_over_12h
 // Commission = a fixed LKR amount per hire (never more than the total);
 // net = total − commission.
@@ -13,17 +14,19 @@
 export type PartnerRates = {
   rate4h: number | null
   rate8h: number | null
+  rate10h: number | null
   rate12h: number | null
   baseOver12h: number | null
   hourlyOver12h: number | null
 }
 
-export type Tier = "upto4" | "upto8" | "upto12" | "over12"
+export type Tier = "upto4" | "upto8" | "upto10" | "upto12" | "over12"
 
 export const TIER_LABEL: Record<Tier, string> = {
   upto4: "Up to 4 hours package",
   upto8: "4 to 8 hours package",
-  upto12: "8 to 12 hours package",
+  upto10: "8 to 10 hours package",
+  upto12: "10 to 12 hours package",
   over12: "Above 12 hours (base rate + extra hours)",
 }
 
@@ -70,6 +73,7 @@ export function fmtDuration(minutes: number) {
 export function tierFor(minutes: number): Tier {
   if (minutes <= 240) return "upto4"
   if (minutes <= 480) return "upto8"
+  if (minutes <= 600) return "upto10"
   if (minutes <= 720) return "upto12"
   return "over12"
 }
@@ -80,6 +84,7 @@ export function canPrice(rates: PartnerRates | null | undefined, minutes: number
   const t = tierFor(minutes)
   if (t === "upto4") return rates.rate4h != null
   if (t === "upto8") return rates.rate8h != null
+  if (t === "upto10") return rates.rate10h != null
   if (t === "upto12") return rates.rate12h != null
   return rates.baseOver12h != null && rates.hourlyOver12h != null
 }
@@ -93,8 +98,16 @@ export function priceHire(rates: PartnerRates, minutes: number) {
     const hireCharge = rates.baseOver12h!
     return { tier, hireCharge, extraHours, extraHourly, extraCharge: extraHours * extraHourly }
   }
-  const hireCharge = tier === "upto4" ? rates.rate4h! : tier === "upto8" ? rates.rate8h! : rates.rate12h!
+  const hireCharge = { upto4: rates.rate4h, upto8: rates.rate8h, upto10: rates.rate10h, upto12: rates.rate12h }[tier]!
   return { tier, hireCharge, extraHours: 0, extraHourly: 0, extraCharge: 0 }
+}
+
+// The car's Pricing for a hire of this length, or null when that duration
+// has no price. Used for customer bookings and partner quotes alike.
+export function hirePrice(rates: PartnerRates | null | undefined, minutes: number) {
+  if (!rates || !canPrice(rates, minutes)) return null
+  const p = priceHire(rates, minutes)
+  return { total: p.hireCharge + p.extraCharge, tierLabel: TIER_LABEL[p.tier] }
 }
 
 export function commissionFor(total: number, amount: number, enabled: boolean) {

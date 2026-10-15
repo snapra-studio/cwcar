@@ -200,7 +200,8 @@ export async function setCoverVideo(url: string | undefined, from: "upload" | "f
 
 // ---- Admin snapshot -----------------------------------------------------------
 
-export async function getAdminState() {
+// Driver papers are only for super admins (they manage drivers).
+export async function getAdminState({ superAdmin }: { superAdmin: boolean }) {
   const [cars, bookings, ledger, kv, drivers, files, indirect, blocks] = await Promise.all([
     q("SELECT * FROM cars ORDER BY name"),
     loadBookings(),
@@ -219,7 +220,7 @@ export async function getAdminState() {
     ledger: ledger.map(toLedger),
     settings: { ...DEFAULT_SETTINGS, ...(settings ? JSON.parse(String(settings.value)) : {}) } as Settings,
     drivers,
-    files,
+    files: superAdmin ? files : files.filter((f) => f.ownerType !== "driver_doc"),
     indirect,
     blocks,
   }

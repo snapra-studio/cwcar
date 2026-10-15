@@ -2,12 +2,15 @@
 
 import { z } from "zod"
 
+import type { PartnerRates } from "@/lib/partner/pricing"
 import { UserError } from "@/lib/server/errors"
 import { Forbidden, requireAdmin, requireSuperAdmin } from "@/lib/server/guard"
 import { sendDecisionEmail } from "@/lib/server/partner-emails"
 import {
   amountSchema,
   approveInquiry,
+  listPartnerRates,
+  ratesFor,
   ratesSchema,
   rejectInquiry,
   removeOverride,
@@ -60,6 +63,22 @@ export async function resendDecisionEmailAction(inquiryId: unknown): Promise<Res
   return run(async () => {
     await requireAdmin()
     return sendDecisionEmail(id.parse(inquiryId))
+  })
+}
+
+// Every own car's Pricing, for the New booking form.
+export async function listRatesAction(): Promise<Result<Record<string, PartnerRates>>> {
+  return run(async () => {
+    await requireAdmin()
+    return Object.fromEntries((await listPartnerRates()).map((c) => [c.carId, c.rates]))
+  })
+}
+
+// The Cars tab's "Pricing" window.
+export async function getRatesAction(carId: unknown): Promise<Result<PartnerRates | null>> {
+  return run(async () => {
+    await requireAdmin()
+    return ratesFor(id.parse(carId))
   })
 }
 

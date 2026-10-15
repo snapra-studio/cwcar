@@ -12,8 +12,8 @@ import {
 } from "@/lib/server/partners"
 
 // Partner Inquiries: B2B inquiries from the public /inquiry page (approve /
-// reject) and partner vehicle prices — any admin. Commission settings — super admin only
-// (the data isn't even loaded for other admins).
+// reject) — any admin. Commission settings — super admin only (the data isn't
+// even loaded for other admins). Partner prices are set per car in the Cars tab.
 export default async function Page({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   await connection()
   const me = await adminPage()

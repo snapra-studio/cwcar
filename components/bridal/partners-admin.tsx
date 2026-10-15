@@ -29,14 +29,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { fmtDate } from "@/lib/bridal/format"
 import { reloadBridal } from "@/lib/bridal/store"
-import { fmtDuration, type PartnerRates } from "@/lib/partner/pricing"
+import { fmtDuration } from "@/lib/partner/pricing"
 import {
   approveInquiryAction,
   rejectInquiryAction,
   removeOverrideAction,
   resendDecisionEmailAction,
   saveCommissionSettingsAction,
-  saveRatesAction,
   setOverrideAction,
 } from "@/lib/server/partner-admin-actions"
 import type { CommissionChange, CommissionOverride, CommissionSettings, InquiryView, RatedCar } from "@/lib/server/partners"
@@ -65,17 +64,13 @@ export function PartnersAdmin({
 }) {
   const pending = inquiries.filter((i) => i.status === "pending").length
   return (
-    <Tabs defaultValue={tab && ["inquiries", "pricing", "commission"].includes(tab) ? tab : "inquiries"} className="grid gap-4">
+    <Tabs defaultValue={tab && ["inquiries", "commission"].includes(tab) ? tab : "inquiries"} className="grid gap-4">
       <TabsList className="h-auto w-fit flex-wrap">
         <TabsTrigger value="inquiries">Inquiries{pending ? ` (${pending} pending)` : ""}</TabsTrigger>
-        <TabsTrigger value="pricing">Partner Vehicle Pricing</TabsTrigger>
         {commission && <TabsTrigger value="commission">Commission Settings</TabsTrigger>}
       </TabsList>
       <TabsContent value="inquiries">
         <Inquiries inquiries={inquiries} />
-      </TabsContent>
-      <TabsContent value="pricing">
-        <Pricing rates={rates} />
       </TabsContent>
       {commission && (
         <TabsContent value="commission">
@@ -348,89 +343,6 @@ function InquiryDetails({ inquiry: i, onClose }: { inquiry: InquiryView | null; 
         </DialogContent>
       </Dialog>
     </>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Partner vehicle pricing
-// ---------------------------------------------------------------------------
-
-const RATE_FIELDS: { key: keyof PartnerRates; label: string; hint: string }[] = [
-  { key: "rate4h", label: "Up to 4 h", hint: "package" },
-  { key: "rate8h", label: "4 – 8 h", hint: "package" },
-  { key: "rate12h", label: "8 – 12 h", hint: "package" },
-  { key: "baseOver12h", label: "Above 12 h: base", hint: "base rate" },
-  { key: "hourlyOver12h", label: "+ per extra hour", hint: "after 12 h" },
-]
-
-function Pricing({ rates }: { rates: RatedCar[] }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">Partner Vehicle Pricing</CardTitle>
-        <CardDescription>
-          B2B prices for hire partners, per car — separate from the customer day rate. Above 12 hours = base rate + each started
-          extra hour × the hourly charge. Leave a box empty if you don&apos;t offer that package (partners will be asked to call).
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3">
-        {rates.map((c) => (
-          <RateRow key={c.carId} car={c} />
-        ))}
-        {rates.length === 0 && <p className="text-muted-foreground">No own cars yet.</p>}
-      </CardContent>
-    </Card>
-  )
-}
-
-function RateRow({ car }: { car: RatedCar }) {
-  const router = useRouter()
-  const init = () => Object.fromEntries(RATE_FIELDS.map((f) => [f.key, car.rates[f.key] == null ? "" : String(car.rates[f.key])])) as Record<keyof PartnerRates, string>
-  const [v, setV] = React.useState(init)
-  const [busy, setBusy] = React.useState(false)
-  const dirty = RATE_FIELDS.some((f) => v[f.key] !== (car.rates[f.key] == null ? "" : String(car.rates[f.key])))
-
-  async function save() {
-    const rates = Object.fromEntries(RATE_FIELDS.map((f) => [f.key, v[f.key].trim() === "" ? null : Number(v[f.key])]))
-    if (Object.values(rates).some((n) => n != null && (!Number.isInteger(n) || n < 0))) return void toast.error("Use whole rupees, 0 or more.")
-    setBusy(true)
-    const r = await saveRatesAction(car.carId, rates)
-    setBusy(false)
-    if (!r.ok) return void toast.error(r.error)
-    toast.success(`Partner prices saved for ${car.name} (${car.color})`)
-    router.refresh()
-  }
-
-  return (
-    <div className="grid gap-3 rounded-xl border p-3 lg:grid-cols-[14rem_repeat(5,minmax(0,1fr))_auto] lg:items-end">
-      <div>
-        <div className="font-medium">{car.name}</div>
-        <div className="text-sm text-muted-foreground capitalize">
-          {car.color}
-          {car.updatedAt ? ` · updated ${when(car.updatedAt)}` : " · not set"}
-        </div>
-      </div>
-      {RATE_FIELDS.map((f) => (
-        <Field key={f.key}>
-          <FieldLabel htmlFor={`${car.carId}-${f.key}`} className="text-xs">
-            {f.label} (LKR)
-          </FieldLabel>
-          <Input
-            id={`${car.carId}-${f.key}`}
-            type="number"
-            min={0}
-            step={500}
-            inputMode="numeric"
-            placeholder="—"
-            value={v[f.key]}
-            onChange={(e) => setV((x) => ({ ...x, [f.key]: e.target.value }))}
-          />
-        </Field>
-      ))}
-      <Button onClick={save} disabled={busy || !dirty}>
-        {busy ? "Saving…" : "Save"}
-      </Button>
-    </div>
   )
 }
 

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { CopyIcon, FlowerIcon, HeartIcon, HouseIcon, PlusIcon, SproutIcon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { useAdminMe } from "@/components/bridal/admin-me"
 import { CarPhoto } from "@/components/bridal/car-art"
 import { InvoiceDialog } from "@/components/bridal/invoice-dialog"
 import { Badge } from "@/components/ui/badge"
@@ -55,12 +56,16 @@ import {
   type EventType,
   type Route,
 } from "@/lib/bridal/types"
+import { durationMinutes, fmtDuration, hirePrice, tierFor, type PartnerRates, type Tier } from "@/lib/partner/pricing"
+import { listRatesAction } from "@/lib/server/partner-admin-actions"
 import { cn } from "@/lib/utils"
 
 type StopRow = { key: string; time: string; loc: string }
 type RouteRows = Omit<Route, "stops"> & { stops: StopRow[] }
 // driverId "" = no driver assigned yet.
-type PickedCar = { carId: string; amount: string; ownerCost: string; driverId: string; route: RouteRows }
+// auto: the amount follows the car's Pricing for the hire's times, until
+// the admin types their own amount.
+type PickedCar = { carId: string; amount: string; ownerCost: string; driverId: string; route: RouteRows; auto?: boolean }
 
 const EMPTY_ROUTE: RouteRows = { pickupTime: "", pickupLoc: "", stops: [], dropTime: "", dropLoc: "" }
 
@@ -138,7 +143,7 @@ function BookingFormInner({
     // Cars are booked by time slot now, so a car with other hires that day
     // can still be picked; the route's times are checked instead.
     return first
-      ? [{ carId: first.id, amount: String(first.rate), ownerCost: defaultOwnerCost(first), driverId: "", route: EMPTY_ROUTE }]
+      ? [{ carId: first.id, amount: String(first.rate), ownerCost: defaultOwnerCost(first), driverId: "", route: EMPTY_ROUTE, auto: true }]
       : []
   })
   const [form, setForm] = React.useState(() =>
@@ -157,6 +162,18 @@ function BookingFormInner({
   )
   const [error, setError] = React.useState("")
   const [invoice, setInvoice] = React.useState<Booking | null>(null)
+  // Each own car's Pricing (4 / 8 / 10 / 12 h packages), from the Cars tab.
+  const [rates, setRates] = React.useState<Record<string, PartnerRates>>({})
+  React.useEffect(() => {
+    let live = true
+    void listRatesAction().then((r) => {
+      if (live && r.ok) setRates(r.data)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+  const suggest = (carId: string, route: RouteRows) => hirePrice(rates[carId], durationMinutes(route.pickupTime, route.dropTime))
 
   const set = <K extends keyof typeof EMPTY>(key: K) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -205,11 +222,18 @@ function BookingFormInner({
   const selected = picked.flatMap((p) => {
     const car = allCars.find((c) => c.id === p.carId)
     if (!car) return []
+    const priced = suggest(car.id, p.route)
+    const raw = p.auto && priced ? String(priced.total) : p.amount
     return [
       {
         car,
-        amount: Math.max(0, Number(p.amount) || 0),
-        raw: p.amount,
+        amount: Math.max(0, Number(raw) || 0),
+        raw,
+        priced,
+        auto: !!p.auto,
+        hasPricing: !!rates[car.id],
+        minutes: durationMinutes(p.route.pickupTime, p.route.dropTime),
+        timed: durationMinutes(p.route.pickupTime, p.route.dropTime) > 0,
         ownerCost: Math.max(0, Number(p.ownerCost) || 0),
         rawOwnerCost: p.ownerCost,
         driverId: p.driverId,
@@ -240,6 +264,7 @@ function BookingFormInner({
                 ownerCost: defaultOwnerCost(car),
                 driverId: "",
                 route: all[0] ? cloneRoute(all[0].route) : EMPTY_ROUTE,
+                auto: true,
               },
             ]
         : all.filter((p) => p.carId !== id)
@@ -247,7 +272,11 @@ function BookingFormInner({
   }
 
   function setAmount(id: string, amount: string) {
-    setPicked((all) => all.map((p) => (p.carId === id ? { ...p, amount } : p)))
+    setPicked((all) => all.map((p) => (p.carId === id ? { ...p, amount, auto: false } : p)))
+  }
+
+  function applyPricing(id: string) {
+    setPicked((all) => all.map((p) => (p.carId === id ? { ...p, auto: true } : p)))
   }
 
   function setDriver(id: string, driverId: string) {
@@ -585,8 +614,26 @@ function BookingFormInner({
                             onChange={(e) => setAmount(s.car.id, e.target.value)}
                           />
                           <FieldDescription>
-                            Standard rate {rs(s.car.rate)}. Change it for this booking if needed.
+                            {s.priced ? (
+                              <>
+                                Hire time {fmtDuration(s.minutes)} → {rs(s.priced.total)}.{" "}
+                                {s.auto ? (
+                                  "Change it for this booking if needed."
+                                ) : s.amount !== s.priced.total ? (
+                                  <button type="button" className="underline underline-offset-2" onClick={() => applyPricing(s.car.id)}>
+                                    Use {rs(s.priced.total)}
+                                  </button>
+                                ) : null}
+                              </>
+                            ) : s.hasPricing && s.auto && !s.timed ? (
+                              <>Set the pick-up and drop-off times to fill this in from the car&apos;s Pricing.</>
+                            ) : s.hasPricing && s.auto ? (
+                              <>No Pricing for this duration yet — enter the amount, or set it under Cars → Pricing.</>
+                            ) : (
+                              <>Standard rate {rs(s.car.rate)}. Change it for this booking if needed.</>
+                            )}
                           </FieldDescription>
+                          {s.hasPricing && <PriceList rates={rates[s.car.id]} minutes={s.timed ? s.minutes : NaN} />}
                         </Field>
                         {isPartner(s.car) && (
                           <Field>
@@ -736,6 +783,56 @@ function SummaryLine({ label, value }: { label: string; value: string }) {
   )
 }
 
+// The car's price list (Cars → Pricing), with the row for this hire's
+// duration highlighted.
+function PriceList({ rates, minutes }: { rates: PartnerRates; minutes: number }) {
+  const active: Tier | null = minutes > 0 ? tierFor(minutes) : null
+  const price = (n: number | null) => (n == null ? "—" : rs(n))
+  const rows: { tier: Tier; label: string; value: string }[] = [
+    { tier: "upto4", label: "Up to 4 hours", value: price(rates.rate4h) },
+    { tier: "upto8", label: "Up to 8 hours", value: price(rates.rate8h) },
+    { tier: "upto10", label: "Up to 10 hours", value: price(rates.rate10h) },
+    { tier: "upto12", label: "Up to 12 hours", value: price(rates.rate12h) },
+    {
+      tier: "over12",
+      label: "Above 12 hours",
+      value:
+        rates.baseOver12h == null || rates.hourlyOver12h == null
+          ? "—"
+          : `${rs(rates.baseOver12h)} + ${rs(rates.hourlyOver12h)}/extra hour`,
+    },
+  ]
+  return (
+    <ul aria-label="Price list" className="grid overflow-hidden rounded-lg border text-xs">
+      {rows.map((row) => (
+        <li
+          key={row.tier}
+          aria-current={row.tier === active ? "true" : undefined}
+          className={cn(
+            "flex justify-between gap-3 px-2.5 py-1.5 not-last:border-b",
+            row.tier === active ? "bg-primary/10 font-semibold text-foreground" : "text-muted-foreground"
+          )}
+        >
+          <span>{row.label}</span>
+          <span className="tabular-nums">{row.value}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// Only super admins manage drivers.
+function NoDriversHint() {
+  const me = useAdminMe()
+  return me?.role === "super_admin" ? (
+    <>
+      No drivers yet. <Link href="/admin/dashboard/drivers">Add a driver</Link>.
+    </>
+  ) : (
+    <>No drivers yet. Ask a super admin to add one.</>
+  )
+}
+
 function RouteEditor({
   idPrefix,
   title,
@@ -804,7 +901,7 @@ function RouteEditor({
         </NativeSelect>
         {drivers.length === 0 && (
           <FieldDescription>
-            No drivers yet. <Link href="/admin/dashboard/drivers">Add a driver</Link>.
+            <NoDriversHint />
           </FieldDescription>
         )}
       </Field>

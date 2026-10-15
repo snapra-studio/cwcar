@@ -4,8 +4,10 @@ import * as React from "react"
 import { CropIcon, FileTextIcon, ImagePlusIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
+import { useAdminMe } from "@/components/bridal/admin-me"
 import { CarPhoto, Swatch } from "@/components/bridal/car-art"
 import { CarExpensesDialog } from "@/components/bridal/car-expenses-dialog"
+import { CarPricingDialog } from "@/components/bridal/car-pricing-dialog"
 import { ConfirmAction } from "@/components/bridal/confirm-action"
 import { ExpiryWarning, FilesDialog } from "@/components/bridal/files-dialog"
 import { PhotoEditor, type PhotoSource } from "@/components/bridal/photo-editor"
@@ -43,6 +45,7 @@ const STYLE_LABEL: Record<CarStyle, string> = { sedan: "Sedan", vintage: "Vintag
 
 export function FleetView() {
   const { ready } = useBridal()
+  const me = useAdminMe()
   if (!ready) {
     return (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -55,9 +58,12 @@ export function FleetView() {
   return (
     <div className="grid gap-8">
       <FleetGrid />
-      <div className="max-w-2xl">
-        <SettingsForm />
-      </div>
+      {/* Invoice details: super admins only (the server checks too). */}
+      {me?.role === "super_admin" && (
+        <div className="max-w-2xl">
+          <SettingsForm />
+        </div>
+      )}
     </div>
   )
 }
@@ -277,14 +283,9 @@ function FleetCard({ car: c, nextHire }: { car: Car; nextHire?: string }) {
           )}
           <ExpiryWarning files={docs} />
         </div>
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <div className="text-2xl font-bold tabular-nums">{rs(c.rate)}</div>
-            <div className="text-xs text-muted-foreground">
-              per day{isPartner(c) && ` · we pay owner ${rs(c.ownerCost ?? 0)}`}
-            </div>
-          </div>
-          <div className="flex flex-wrap justify-end gap-1.5">
+        <div className="grid gap-2">
+          {isPartner(c) && <div className="text-xs text-muted-foreground">We pay owner {rs(c.ownerCost ?? 0)} per hire</div>}
+          <div className="flex flex-wrap gap-1.5">
             <CarPhotoButtons image={c.image} addLabel="Add photo" onSave={(image) => saveImage(c.id, image)} />
             {c.image && (
               <Button
@@ -298,6 +299,7 @@ function FleetCard({ car: c, nextHire }: { car: Car; nextHire?: string }) {
               </Button>
             )}
             <EditCarDialog car={c} />
+            {!isPartner(c) && <CarPricingDialog car={c} />}
             <CarExpensesDialog car={c} />
             <FilesDialog
               ownerType="car_doc"

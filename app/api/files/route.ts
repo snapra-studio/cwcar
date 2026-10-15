@@ -13,8 +13,9 @@ const OWNERS = Object.keys(DOC_TYPES) as DocOwner[]
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status })
 
 export async function POST(request: Request) {
+  let superAdmin = false
   try {
-    await requireAdmin()
+    superAdmin = (await requireAdmin()).role === "super_admin"
   } catch (err) {
     if (err instanceof Forbidden) return bad("Log in again.", 401)
     throw err
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
 
   if (!(file instanceof File)) return bad("Choose a file.")
   if (!OWNERS.includes(ownerType) || !/^[\w-]{1,80}$/.test(ownerId)) return bad("Unknown place to attach the file.")
+  if (ownerType === "driver_doc" && !superAdmin) return bad("Only a super admin can add driver documents.", 403)
   const kind = DOC_TYPES[ownerType].find((d) => d.label === docType)
   if (!kind) return bad("Pick what kind of document this is.")
   if (expiresOn && !/^\d{4}-\d{2}-\d{2}$/.test(expiresOn)) return bad("Use a YYYY-MM-DD expiry date.")

@@ -41,7 +41,7 @@ const id = z.string().min(1).max(80)
 
 // ---- Snapshot ----
 export async function loadAdminState() {
-  return run(() => repo.getAdminState())
+  return run(async () => repo.getAdminState({ superAdmin: (await requireAdmin()).role === "super_admin" }))
 }
 
 // ---- Bookings ----
@@ -70,8 +70,12 @@ export async function removeCarAction(carId: unknown) {
 }
 
 // ---- Settings ----
+// Invoice details (business name, bank account…): super admins only.
 export async function saveSettingsAction(input: unknown) {
-  return run(() => repo.saveSettings(settingsSchema.parse(input)))
+  return run(async () => {
+    if ((await requireAdmin()).role !== "super_admin") throw new repo.UserError("Only a super admin can change the invoice details.")
+    return repo.saveSettings(settingsSchema.parse(input))
+  })
 }
 export async function setCoverImageAction(image: unknown) {
   return run(() => repo.setCoverImage(settingsSchema.shape.coverImage.parse(image ?? undefined)))
@@ -85,15 +89,27 @@ export async function removeLedgerAction(entryId: unknown) {
   return run(() => repo.removeLedgerEntry(id.parse(entryId)))
 }
 
-// ---- Drivers ----
+// ---- Drivers (super admins only) ----
+async function superOnly(what: string) {
+  if ((await requireAdmin()).role !== "super_admin") throw new repo.UserError(`Only a super admin can ${what}.`)
+}
 export async function createDriverAction(input: unknown) {
-  return run(() => repo.createDriver(driverCreateSchema.parse(input)))
+  return run(async () => {
+    await superOnly("add drivers")
+    return repo.createDriver(driverCreateSchema.parse(input))
+  })
 }
 export async function updateDriverAction(driverId: unknown, input: unknown) {
-  return run(() => repo.updateDriver(id.parse(driverId), driverUpdateSchema.parse(input)))
+  return run(async () => {
+    await superOnly("change drivers")
+    return repo.updateDriver(id.parse(driverId), driverUpdateSchema.parse(input))
+  })
 }
 export async function setDriverPasswordAction(driverId: unknown, password: unknown) {
-  return run(() => repo.setDriverPassword(id.parse(driverId), passwordSchema.parse(password)))
+  return run(async () => {
+    await superOnly("change driver passwords")
+    return repo.setDriverPassword(id.parse(driverId), passwordSchema.parse(password))
+  })
 }
 
 // ---- Documents ----
@@ -104,6 +120,7 @@ export async function deleteFileAction(fileId: unknown) {
     if (!found || ["car_image", "cover", "cover_video"].includes(found.meta.ownerType)) {
       throw new repo.UserError("That file no longer exists.")
     }
+    if (found.meta.ownerType === "driver_doc") await superOnly("remove driver documents")
     await deleteFile(found.meta.id)
   })
 }
