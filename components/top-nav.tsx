@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation"
 import {
   CalendarDaysIcon,
   CarFrontIcon,
+  HandshakeIcon,
   HouseIcon,
   IdCardIcon,
   ListIcon,
@@ -20,7 +21,7 @@ import {
 } from "lucide-react"
 
 import { logout } from "@/app/admin/login/actions"
-import { ACCOUNT_URL, accountTitle, useAdminMe } from "@/components/bridal/admin-me"
+import { ACCOUNT_URL, accountTitle, useAdminMe, type AdminMe } from "@/components/bridal/admin-me"
 import { useBridal } from "@/lib/bridal/store"
 import { cn } from "@/lib/utils"
 
@@ -46,9 +47,18 @@ export const NAV_ITEMS = [
     description: "Petrol, extra charges and profit per hire",
   },
   { title: "Cars", url: "/admin/dashboard/cars", icon: CarFrontIcon, description: "Our fleet and partner vehicles" },
-  { title: "Drivers", url: "/admin/dashboard/drivers", icon: IdCardIcon, description: "Driver logins and assignments" },
-  { title: "Customers", url: "/admin/dashboard/customers", icon: UsersIcon, description: "Everyone you have hired to" },
+  { title: "Drivers", url: "/admin/dashboard/drivers", icon: IdCardIcon, description: "Driver logins and assignments", superOnly: true },
+  { title: "Customers", url: "/admin/dashboard/customers", icon: UsersIcon, description: "Everyone you have hired to", superOnly: true },
+  {
+    title: "Partner Inquiries",
+    url: "/admin/dashboard/partners",
+    icon: HandshakeIcon,
+    description: "B2B hire inquiries, partner prices and commission",
+  },
 ]
+
+// The sections this admin may open (Drivers, Customers: super admins only).
+export const navItemsFor = (me: AdminMe | null) => NAV_ITEMS.filter((i) => !("superOnly" in i) || me?.role === "super_admin")
 
 const isActiveLink = (pathname: string, url: string) =>
   url === "/admin/dashboard" ? pathname === url : pathname === url || pathname.startsWith(`${url}/`)
@@ -92,7 +102,7 @@ export function TopNav({ overlay = false }: { overlay?: boolean }) {
         </Link>
 
         <nav aria-label="Main" className="ml-auto hidden items-center gap-0.5 xl:flex">
-          {NAV_ITEMS.map((item) => {
+          {navItemsFor(me).map((item) => {
             const active = isActiveLink(pathname, item.url)
             return (
               <Link
@@ -160,7 +170,7 @@ export function TopNav({ overlay = false }: { overlay?: boolean }) {
           className="absolute inset-x-0 top-16 animate-in border-b bg-background text-foreground shadow-lg duration-200 fade-in slide-in-from-top-2 xl:hidden"
         >
           <ul className="mx-auto grid max-w-7xl gap-1 p-3 sm:grid-cols-2">
-            {NAV_ITEMS.map((item) => {
+            {navItemsFor(me).map((item) => {
               const active = isActiveLink(pathname, item.url)
               return (
                 <li key={item.url}>

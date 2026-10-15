@@ -200,7 +200,8 @@ export async function setCoverVideo(url: string | undefined, from: "upload" | "f
 
 // ---- Admin snapshot -----------------------------------------------------------
 
-export async function getAdminState() {
+// Driver papers are only for super admins (they manage drivers).
+export async function getAdminState({ superAdmin }: { superAdmin: boolean }) {
   const [cars, bookings, ledger, kv, drivers, files, indirect, blocks] = await Promise.all([
     q("SELECT * FROM cars ORDER BY name"),
     loadBookings(),
@@ -219,7 +220,7 @@ export async function getAdminState() {
     ledger: ledger.map(toLedger),
     settings: { ...DEFAULT_SETTINGS, ...(settings ? JSON.parse(String(settings.value)) : {}) } as Settings,
     drivers,
-    files,
+    files: superAdmin ? files : files.filter((f) => f.ownerType !== "driver_doc"),
     indirect,
     blocks,
   }
@@ -305,7 +306,7 @@ export async function removeCar(id: string) {
 
 // ---- Bookings -----------------------------------------------------------------
 
-type BookingInput = z.infer<typeof bookingInputSchema>
+export type BookingInput = z.infer<typeof bookingInputSchema>
 
 // Everything a save needs to validate, fetched in one round trip.
 async function bookingChecks(db: Db, input: BookingInput, excludeId: string) {
@@ -438,8 +439,19 @@ export async function createBooking(input: BookingInput): Promise<Booking> {
   // Retries only if two saves pick the same invoice number at once.
   for (let attempt = 0; ; attempt++) {
     try {
-      return await guardDoubleBooking(() =>
-        tx(async (db) => {
+      return await guardDoubleBooking(() => tx((db) => insertBooking(db, input, attempt)))
+    } catch (err) {
+      if (attempt < 5 && isUniqueViolation(err, "bookings_inv_no_key")) continue
+      throw err
+    }
+  }
+}
+
+// One new booking inside the caller's transaction (the normal save above, and
+// approving a partner inquiry): the same checks — cars exist, no overlapping
+// hire or unavailable period under the per-car lock — and the same rows.
+// `extra.partnerInquiryId` links a booking made from a partner inquiry.
+export async function insertBooking(db: Db, input: BookingInput, attempt = 0, extra: { partnerInquiryId?: string } = {}): Promise<Booking> {
           const checks = await bookingChecks(db, input, "")
           const money = validate(input, checks)
           const id = uid()
@@ -469,6 +481,9 @@ export async function createBooking(input: BookingInput): Promise<Booking> {
             ]
           )
           await insertBookingCars(db, id, input.date, true, input.cars)
+          if (extra.partnerInquiryId) {
+            await db.query("UPDATE bookings SET partner_inquiry_id = $2 WHERE id = $1", [id, extra.partnerInquiryId])
+          }
           return {
             id,
             invNo,
@@ -486,13 +501,6 @@ export async function createBooking(input: BookingInput): Promise<Booking> {
             ...money,
             advance: input.advance,
           } satisfies Booking
-        })
-      )
-    } catch (err) {
-      if (attempt < 5 && isUniqueViolation(err, "bookings_inv_no_key")) continue
-      throw err
-    }
-  }
 }
 
 // Keeps the invoice number and creation date; bumps the revision so the

@@ -125,7 +125,12 @@ export function SiteFooter({ bizName, year, cars }: { bizName: string; year: str
             <Image src="/logo.png" alt={`${bizName} logo`} width={28} height={28} className="size-7" />
             {bizName}
           </span>
-          <span>© {year} · Wedding car hire · Ja-Ela, Sri Lanka</span>
+          <span className="flex flex-wrap items-center gap-x-3">
+            <a href="/inquiry" className="hover:text-[#16120E] hover:underline">
+              Hire partners
+            </a>
+            <span>© {year} · Wedding car hire · Ja-Ela, Sri Lanka</span>
+          </span>
         </div>
       </div>
     </footer>

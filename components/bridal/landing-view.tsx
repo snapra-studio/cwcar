@@ -6,7 +6,8 @@ import Link from "next/link"
 import { ArrowRightIcon, CalendarClockIcon, ImagePlusIcon, RefreshCwIcon, SparklesIcon, Trash2Icon, VideoIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { NAV_ITEMS } from "@/components/top-nav"
+import { useAdminMe } from "@/components/bridal/admin-me"
+import { navItemsFor } from "@/components/top-nav"
 import { PhotoPicker } from "@/components/bridal/fleet-view"
 import { InvoiceDialog } from "@/components/bridal/invoice-dialog"
 import { Button } from "@/components/ui/button"
@@ -51,6 +52,7 @@ async function saveCover(image: string | undefined) {
 
 function Landing() {
   const { cars, bookings, blocks, settings } = useBridal()
+  const me = useAdminMe()
   const [invoice, setInvoice] = React.useState<Booking | null>(null)
   const today = todayIso()
   const month = today.slice(0, 7)
@@ -148,7 +150,7 @@ function Landing() {
               aria-label="Sections"
               className="grid animate-in grid-cols-2 gap-3 delay-300 duration-700 fade-in fill-mode-both slide-in-from-bottom-4 sm:grid-cols-3 xl:grid-cols-5"
             >
-              {NAV_ITEMS.filter((i) => i.url !== "/admin/dashboard").map((item) => (
+              {navItemsFor(me).filter((i) => i.url !== "/admin/dashboard").map((item) => (
                 <Link
                   key={item.url}
                   href={item.url}

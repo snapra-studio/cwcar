@@ -137,6 +137,9 @@ function refresh() {
   return loading
 }
 
+// Reload everything now (e.g. after approving a partner inquiry created a booking).
+export const reloadBridal = () => refresh()
+
 // Pick up changes made on another device when the admin comes back to the tab.
 function onVisible() {
   if (document.visibilityState === "visible" && Date.now() - lastLoad > 30_000) void refresh()

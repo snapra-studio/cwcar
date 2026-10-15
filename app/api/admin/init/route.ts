@@ -8,8 +8,9 @@ import { getAdminState, initializeFrom } from "@/lib/server/repo"
 // A route handler rather than a server action because the old data can be
 // several MB of car photos.
 export async function POST(request: Request) {
+  let superAdmin = false
   try {
-    await requireAdmin()
+    superAdmin = (await requireAdmin()).role === "super_admin"
   } catch (err) {
     if (err instanceof Forbidden) return NextResponse.json({ error: "Log in again." }, { status: 401 })
     throw err
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
   try {
     const local = body.local && typeof body.local === "object" ? (body.local as Parameters<typeof initializeFrom>[0]) : null
     const result = await initializeFrom(local)
-    return NextResponse.json({ ...result, state: await getAdminState() })
+    return NextResponse.json({ ...result, state: await getAdminState({ superAdmin }) })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: "Could not import this browser's data." }, { status: 500 })
