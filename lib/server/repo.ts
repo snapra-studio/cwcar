@@ -187,6 +187,17 @@ export async function setCoverImage(image: string | undefined) {
   return next
 }
 
+// Sets (a newly stored PDF) or clears the public site's brochure, and
+// removes the previous file.
+export async function setBrochure(file: { url: string; name: string } | undefined) {
+  const old = (await getSettings()).brochure
+  const next = file
+    ? await mergeSettings({ brochure: file.url, brochureName: file.name, brochureUpdatedAt: new Date().toISOString() })
+    : await mergeSettings({}, ["brochure", "brochureName", "brochureUpdatedAt"])
+  if (old && old !== file?.url) await deletePhotoUrl(old)
+  return next
+}
+
 // Sets (a newly stored video's URL) or clears the public page's background
 // video, and removes the previous file.
 export async function setCoverVideo(url: string | undefined, from: "upload" | "facebook" = "upload") {

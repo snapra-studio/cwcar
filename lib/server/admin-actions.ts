@@ -117,7 +117,7 @@ export async function setDriverPasswordAction(driverId: unknown, password: unkno
 export async function deleteFileAction(fileId: unknown) {
   return run(async () => {
     const found = await getFile(id.parse(fileId))
-    if (!found || ["car_image", "cover", "cover_video"].includes(found.meta.ownerType)) {
+    if (!found || ["car_image", "cover", "cover_video", "brochure"].includes(found.meta.ownerType)) {
       throw new repo.UserError("That file no longer exists.")
     }
     if (found.meta.ownerType === "driver_doc") await superOnly("remove driver documents")

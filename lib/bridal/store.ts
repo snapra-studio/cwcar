@@ -246,6 +246,15 @@ export async function setCoverVideo(file: File | null) {
   return body.settings as Settings
 }
 
+// Uploads (or, with null, removes) the public site's brochure PDF.
+export async function setBrochure(file: File | null) {
+  const r = await fetch("/api/admin/brochure", file ? { method: "POST", body: (() => { const f = new FormData(); f.append("file", file); return f })() } : { method: "DELETE" })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? "Could not save the brochure. Try again.")
+  patch(() => ({ settings: body.settings }))
+  return body.settings as Settings
+}
+
 export type FacebookStatus = {
   configured: boolean
   lastAttemptAt?: string

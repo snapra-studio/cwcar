@@ -8,12 +8,13 @@ import { siteUrl } from "@/lib/server/public-site"
 export const dynamic = "force-dynamic"
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const { cars } = await getPublicSite()
+  const { cars, brochure } = await getPublicSite()
   const now = new Date()
   const base = siteUrl()
   return [
     { url: `${base}/`, lastModified: now, changeFrequency: "daily", priority: 1 },
     { url: `${base}/wedding-cars`, lastModified: now, changeFrequency: "weekly", priority: 0.9 },
+    ...(brochure ? [{ url: `${base}/brochure`, lastModified: now, changeFrequency: "monthly" as const, priority: 0.6 }] : []),
     ...cars.map((c) => ({
       url: carUrl(c),
       lastModified: now,

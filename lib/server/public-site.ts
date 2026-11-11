@@ -7,7 +7,7 @@ import { getPublicCars, getSettings } from "@/lib/server/repo"
 // see the real content): public business contact details, our own fleet
 // (names, colours, types, photos — no prices, plates or partner cars) and the
 // background video. Nothing about hires.
-export type PublicBusiness = { name: string; phone: string; email: string; address: string }
+export type PublicBusiness = { name: string; phone: string; email: string; address: string; brochure?: boolean }
 
 // The site's public address, for canonical links, the sitemap and Open Graph.
 export const siteUrl = () => (process.env.APP_URL || "https://www.chrishrentals.com").replace(/\/+$/, "")
@@ -22,10 +22,12 @@ export async function getPublicSite() {
     phone: settings.bizPhone,
     email: settings.bizEmail,
     address: settings.bizAddr,
+    brochure: !!settings.brochure?.startsWith("/api/files/"),
   }
   const video = settings.coverVideo?.startsWith("/api/files/") ? settings.coverVideo : undefined
   const coverImage = settings.coverImage?.startsWith("/api/files/") ? settings.coverImage : cars.find((c) => c.image)?.image
-  return { business, cars, video, coverImage }
+  const brochure = business.brochure ? { url: settings.brochure!, name: settings.brochureName ?? "", updatedAt: settings.brochureUpdatedAt } : undefined
+  return { business, cars, video, coverImage, brochure }
 }
 
 // "Chrish Wedding Cars pvt ltd" -> "Chrish Wedding Cars".

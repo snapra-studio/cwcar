@@ -2,7 +2,7 @@ import "server-only"
 
 import { randomBytes } from "node:crypto"
 
-import { MAX_UPLOAD_BYTES, MAX_VIDEO_BYTES, type DocOwner, type FileMeta } from "@/lib/bridal/types"
+import { MAX_UPLOAD_BYTES, MAX_BROCHURE_BYTES, MAX_VIDEO_BYTES, type DocOwner, type FileMeta } from "@/lib/bridal/types"
 import { q, type Row } from "@/lib/server/db"
 import { UserError } from "@/lib/server/errors"
 import { deleteObjects, putObject } from "@/lib/server/storage"
@@ -93,7 +93,11 @@ export async function saveFile(input: {
 }): Promise<FileMeta> {
   const video = input.ownerType === "cover_video"
   if (!input.bytes.length) throw new UserError("That file is empty.")
-  if (input.bytes.length > (video ? MAX_VIDEO_BYTES : MAX_UPLOAD_BYTES)) {
+  if (input.ownerType === "brochure") {
+    // The public brochure: a PDF only, and allowed to be larger.
+    if (input.bytes.length > MAX_BROCHURE_BYTES) throw new UserError("Brochures can be up to 40 MB. Export a smaller PDF.")
+    if (detectType(input.bytes, input.fileName) !== "application/pdf") throw new UserError("Upload the brochure as a PDF.")
+  } else if (input.bytes.length > (video ? MAX_VIDEO_BYTES : MAX_UPLOAD_BYTES)) {
     throw new UserError(video ? "Videos can be up to 40 MB. Export a shorter or smaller clip." : "Files can be up to 15 MB.")
   }
   const fileName = safeFileName(input.fileName)
@@ -177,7 +181,7 @@ export const deleteFilesOf = (ownerType: FileOwnerType, ownerIds: string[]) =>
 // Removes the stored photo behind a /api/files/<id> URL (when replaced).
 export async function deletePhotoUrl(url: string | undefined) {
   const id = fileIdFromUrl(url)
-  if (id) await removeRows("id = $1 AND owner_type IN ('car_image', 'cover', 'cover_video')", [id])
+  if (id) await removeRows("id = $1 AND owner_type IN ('car_image', 'cover', 'cover_video', 'brochure')", [id])
 }
 
 // Does the thing a document is being attached to exist?

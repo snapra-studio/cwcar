@@ -174,6 +174,11 @@ export type Settings = {
   // or switched off (no video, don't fetch one).
   coverVideo?: string
   coverVideoFrom?: "upload" | "facebook" | "none"
+  // Brochure PDF for the public site's flip-book viewer (/brochure): its
+  // /api/files URL, original file name and when it was uploaded.
+  brochure?: string
+  brochureName?: string
+  brochureUpdatedAt?: string
 }
 
 // ---- Uploaded files (stored in S3-compatible storage) ----------------------
@@ -184,7 +189,7 @@ export type DocOwner = "booking" | "ledger" | "car_doc" | "driver_doc" | "indire
 
 export type FileMeta = {
   id: string
-  ownerType: DocOwner | "car_image" | "cover" | "cover_video"
+  ownerType: DocOwner | "car_image" | "cover" | "cover_video" | "brochure"
   ownerId: string
   docType: string
   expiresOn?: string
@@ -215,3 +220,4 @@ export const DOC_TYPES: Record<DocOwner, { label: string; expires?: boolean }[]>
 export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 // The public page's background video (a short, compressed clip).
 export const MAX_VIDEO_BYTES = 40 * 1024 * 1024
+export const MAX_BROCHURE_BYTES = 40 * 1024 * 1024

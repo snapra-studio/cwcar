@@ -20,7 +20,7 @@ export default async function InquiryPage() {
   await connection()
   const site = await getPublicSite()
   return (
-    <PartnerPageShell bizName={site.business.name} cars={site.cars} today={todayInBusinessTz()}>
+    <PartnerPageShell bizName={site.business.name} cars={site.cars} today={todayInBusinessTz()} brochure={site.business.brochure}>
       <header className="grid gap-3">
         <p className="text-xs font-medium tracking-[0.3em] text-[#6B6259] uppercase">For hire companies &amp; agents</p>
         <h1 className="text-[clamp(2rem,5vw,3.5rem)] leading-[1] font-medium tracking-[-0.035em]">Hire Partner Inquiry</h1>

@@ -5,6 +5,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  BookOpenIcon,
   CalendarDaysIcon,
   CarFrontIcon,
   HandshakeIcon,
@@ -47,6 +48,7 @@ export const NAV_ITEMS = [
     description: "Petrol, extra charges and profit per hire",
   },
   { title: "Cars", url: "/admin/dashboard/cars", icon: CarFrontIcon, description: "Our fleet and partner vehicles" },
+  { title: "Brochure", url: "/admin/dashboard/brochure", icon: BookOpenIcon, description: "The brochure PDF on the website" },
   { title: "Drivers", url: "/admin/dashboard/drivers", icon: IdCardIcon, description: "Driver logins and assignments", superOnly: true },
   { title: "Customers", url: "/admin/dashboard/customers", icon: UsersIcon, description: "Everyone you have hired to", superOnly: true },
   {
@@ -89,7 +91,7 @@ export function TopNav({ overlay = false }: { overlay?: boolean }) {
       )}
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4">
-        <Link href="/admin/dashboard" className="flex min-w-0 items-center gap-2.5">
+        <Link href="/admin/dashboard" className="flex min-w-0 shrink-0 items-center gap-2.5">
           <Image
             src="/logo.png"
             alt="Chrish Wedding Hires"
@@ -98,7 +100,7 @@ export function TopNav({ overlay = false }: { overlay?: boolean }) {
             priority
             className="size-10 shrink-0 rounded-lg bg-white/85"
           />
-          <span className="hidden truncate text-sm font-semibold sm:block xl:hidden 2xl:block">{settings.bizName}</span>
+          <span className="hidden truncate text-sm font-semibold sm:block xl:hidden">{settings.bizName}</span>
         </Link>
 
         <nav aria-label="Main" className="ml-auto hidden items-center gap-0.5 xl:flex">
@@ -110,7 +112,7 @@ export function TopNav({ overlay = false }: { overlay?: boolean }) {
                 href={item.url}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-2 text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                  "inline-flex items-center gap-1.5 rounded-full px-2 py-2 text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
                   active
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : overlay
@@ -143,7 +145,7 @@ export function TopNav({ overlay = false }: { overlay?: boolean }) {
           )}
           <LogoutButton
             className={cn(
-              "ml-1 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+              "ml-1 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
               overlay ? "text-white/90 hover:bg-white/15 hover:text-white" : "text-foreground/70 hover:bg-destructive/10 hover:text-destructive"
             )}
             iconClassName="size-4"

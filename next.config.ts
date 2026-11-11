@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
       { source: "/dashboard", destination: "/admin/dashboard", permanent: true },
       { source: "/dashboard/:path*", destination: "/admin/dashboard/:path*", permanent: true },
       { source: "/login", destination: "/admin/login", permanent: true },
+      // Short links for hire partners → the partner inquiry page.
+      { source: "/partners", destination: "/inquiry", permanent: false },
+      { source: "/partner", destination: "/inquiry", permanent: false },
     ];
   },
   experimental: {
