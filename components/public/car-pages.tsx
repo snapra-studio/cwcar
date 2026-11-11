@@ -30,12 +30,12 @@ function Shell({ business, cars, today, children }: { business: PublicBusiness; 
   const bizName = wordmark(business.name || "Chrish Wedding Cars")
   return (
     <div className={cn("relative min-h-svh overflow-x-clip bg-[#F7F4EF] pt-24 selection:bg-[#E9D7B8]", INK)}>
-      <FilmNav bizName={bizName} />
+      <FilmNav bizName={bizName} brochure={business.brochure} />
       <main>
         {children}
         <Contact business={business} bizName={bizName} />
       </main>
-      <SiteFooter bizName={bizName} year={today.slice(0, 4)} cars={cars} />
+      <SiteFooter bizName={bizName} year={today.slice(0, 4)} cars={cars} brochure={business.brochure} />
     </div>
   )
 }

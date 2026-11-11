@@ -9,13 +9,13 @@ import { getObject } from "@/lib/server/storage"
 
 // Serves one uploaded file after checking who may see it:
 //   car photos, landing photo,  anyone (they're on the public page)
-//   background video
+//   background video, brochure
 //   hire files (booking)        admin, or a driver assigned to that hire
 //   receipts, vehicle papers    admin only
 //   driver papers               super admin only
 // Anyone else gets 404, so the response never confirms a file exists.
 // Bytes are streamed from storage; the storage address is never revealed.
-const PUBLIC: FileMeta["ownerType"][] = ["car_image", "cover", "cover_video"]
+const PUBLIC: FileMeta["ownerType"][] = ["car_image", "cover", "cover_video", "brochure"]
 
 async function canRead(meta: FileMeta) {
   if (PUBLIC.includes(meta.ownerType)) return true

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { CheckIcon, SearchIcon } from "lucide-react"
+import { ArrowRightIcon, BookOpenIcon, CheckIcon, SearchIcon } from "lucide-react"
 
 import { CarPhoto } from "@/components/bridal/car-art"
 import { CinematicFilm, FilmNav, wordmark } from "@/components/public/cinematic-film"
@@ -69,7 +69,7 @@ export function PublicHome({
 
   return (
     <div id="top" className={cn("relative min-h-svh overflow-x-clip bg-[#F7F4EF] selection:bg-[#E9D7B8]", INK)}>
-      <FilmNav bizName={bizName} />
+      <FilmNav bizName={bizName} brochure={business.brochure} />
 
       <main>
         <CinematicFilm bizName={bizName} video={video} phone={business.phone} cars={cars} today={today} carId={carId} onCarChange={setCarId} />
@@ -188,10 +188,11 @@ export function PublicHome({
 
         <WhyUs />
         <GoogleReviewsSection />
+        {business.brochure && <BrochureBand />}
         <Contact business={business} bizName={bizName} />
       </main>
 
-      <SiteFooter bizName={bizName} year={today.slice(0, 4)} cars={cars} />
+      <SiteFooter bizName={bizName} year={today.slice(0, 4)} cars={cars} brochure={business.brochure} />
     </div>
   )
 }
@@ -227,6 +228,36 @@ function FleetGallery({ cars, onPick }: { cars: PublicCar[]; onPick: (id: string
 }
 
 // ---------- Why us + FAQ (also the page's FAQ structured data) ----------
+
+// Invites visitors to flip through the uploaded brochure (/brochure).
+function BrochureBand() {
+  return (
+    <section id="brochure" aria-labelledby="brochure-title" className="scroll-mt-24 px-3 py-6 sm:px-4">
+      <Reveal>
+        <a
+          href="/brochure"
+          className="group mx-auto flex max-w-[88rem] flex-col items-start gap-6 rounded-[2rem] bg-[#2A2420] px-6 py-10 text-[#F6EEE2] sm:flex-row sm:items-center sm:justify-between sm:px-12 sm:py-14"
+        >
+          <span className="flex items-center gap-5">
+            <span className="grid size-14 shrink-0 place-items-center rounded-full border border-[#F6EEE2]/25 sm:size-16">
+              <BookOpenIcon className="size-6 sm:size-7" aria-hidden />
+            </span>
+            <span className="grid gap-1">
+              <span className="text-[11px] font-medium tracking-[0.3em] text-[#F6EEE2]/70 uppercase">Our brochure</span>
+              <span id="brochure-title" className={cn(display.className, "text-[clamp(1.6rem,3.5vw,2.5rem)] leading-[1.05] font-medium tracking-[-0.03em]")}>
+                Flip through our wedding cars &amp; packages
+              </span>
+            </span>
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-[#F6EEE2] px-5 py-3 text-sm font-medium text-[#16120E] transition group-hover:gap-3">
+            View brochure
+            <ArrowRightIcon className="size-4" aria-hidden />
+          </span>
+        </a>
+      </Reveal>
+    </section>
+  )
+}
 
 function WhyUs() {
   return (

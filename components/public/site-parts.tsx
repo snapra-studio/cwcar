@@ -12,7 +12,8 @@ import { cn } from "@/lib/utils"
 // Pieces shared by the customer website's pages (home and each car's page).
 
 export type PublicCar = { id: string; slug: string; name: string; color: string; hex: string; style: CarStyle; image?: string }
-export type PublicBusiness = { name: string; phone: string; email: string; address: string }
+// brochure: a brochure PDF is uploaded (shows the /brochure links).
+export type PublicBusiness = { name: string; phone: string; email: string; address: string; brochure?: boolean }
 
 export const STYLE_LABEL: Record<CarStyle, string> = { sedan: "Sedan", vintage: "Vintage", suv: "SUV" }
 const STYLE_WORDS: Record<CarStyle, string> = { sedan: "luxury sedan", vintage: "vintage classic", suv: "SUV" }
@@ -107,7 +108,7 @@ export function Contact({ business, bizName }: { business: PublicBusiness; bizNa
   )
 }
 
-export function SiteFooter({ bizName, year, cars }: { bizName: string; year: string; cars: PublicCar[] }) {
+export function SiteFooter({ bizName, year, cars, brochure }: { bizName: string; year: string; cars: PublicCar[]; brochure?: boolean }) {
   return (
     <footer className="px-3 pb-6 sm:px-4">
       <div className={cn("mx-auto grid max-w-[88rem] gap-4 px-2 pt-4 text-sm", MUTED)}>
@@ -126,6 +127,11 @@ export function SiteFooter({ bizName, year, cars }: { bizName: string; year: str
             {bizName}
           </span>
           <span className="flex flex-wrap items-center gap-x-3">
+            {brochure && (
+              <a href="/brochure" className="hover:text-[#16120E] hover:underline">
+                Brochure
+              </a>
+            )}
             <a href="/inquiry" className="hover:text-[#16120E] hover:underline">
               Hire partners
             </a>

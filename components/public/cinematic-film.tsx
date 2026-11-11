@@ -157,7 +157,7 @@ export function CinematicFilm({
 
 // Top bar: links either side of the logo. See-through over the film; a pale
 // frosted bar once the film has scrolled away.
-export function FilmNav({ bizName }: { bizName: string }) {
+export function FilmNav({ bizName, brochure }: { bizName: string; brochure?: boolean }) {
   const [onFilm, setOnFilm] = React.useState(true)
   React.useEffect(() => {
     let frame = 0
@@ -200,6 +200,11 @@ export function FilmNav({ bizName }: { bizName: string }) {
           <Image src="/logo.png" alt={`${wordmark(bizName)} logo`} width={160} height={160} priority className="h-20 w-auto drop-shadow-[0_0_14px_rgba(255,236,200,0.35)] sm:h-24" />
         </Link>
         <div className="flex items-center justify-end gap-8">
+          {brochure && (
+            <Link href="/brochure" className={link}>
+              Brochure
+            </Link>
+          )}
           <Link href="/#reviews" className={link}>
             Reviews
           </Link>

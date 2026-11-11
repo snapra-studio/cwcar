@@ -42,3 +42,6 @@ next-env.d.ts
 
 # local database
 /data/
+
+# PDF.js helper files, copied from node_modules (scripts/copy-pdfjs-assets.mjs)
+/public/pdfjs/
