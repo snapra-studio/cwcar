@@ -4,7 +4,7 @@ import * as React from "react"
 import { DownloadIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { InvoiceSheet, SHEET_H, SHEET_W } from "@/components/bridal/invoice-sheet"
+import { InvoiceSheet, SHEET_H, SHEET_W, type QuotationInfo } from "@/components/bridal/invoice-sheet"
 import { Button } from "@/components/ui/button"
 import type { Booking, Settings } from "@/lib/bridal/types"
 
@@ -24,7 +24,7 @@ function useFitScale() {
   return [ref, scale] as const
 }
 
-export function useInvoicePreview(booking: Booking | null, settings: Settings) {
+export function useInvoicePreview(booking: Booking | null, settings: Settings, quotation?: QuotationInfo) {
   const [downloading, setDownloading] = React.useState(false)
   const sheetRef = React.useRef<HTMLDivElement | null>(null)
   const [sheetH, setSheetH] = React.useState(SHEET_H)
@@ -50,8 +50,9 @@ export function useInvoicePreview(booking: Booking | null, settings: Settings) {
       const { downloadInvoicePdf } = await import("@/lib/bridal/invoice-pdf")
       // Each revision gets its own file so earlier copies aren't overwritten.
       const rev = booking.revision ?? 1
-      await downloadInvoicePdf(sheetRef.current, `${booking.invNo}${rev > 1 ? `-rev${rev}` : ""}.pdf`)
-      toast.success("Invoice downloaded")
+      const name = quotation ? `${booking.invNo}-quotation-v${rev}.pdf` : `${booking.invNo}${rev > 1 ? `-rev${rev}` : ""}.pdf`
+      await downloadInvoicePdf(sheetRef.current, name)
+      toast.success(quotation ? "Quotation downloaded" : "Invoice downloaded")
     } catch {
       toast.error("Could not create the PDF. Reload the page and try again.")
     } finally {
@@ -66,7 +67,7 @@ export function useInvoicePreview(booking: Booking | null, settings: Settings) {
         style={{ width: SHEET_W * scale, height: sheetH * scale }}
       >
         <div style={{ transform: `scale(${scale})`, transformOrigin: "top left" }}>
-          <InvoiceSheet ref={measureSheet} booking={booking} settings={settings} />
+          <InvoiceSheet ref={measureSheet} booking={booking} settings={settings} quotation={quotation} />
         </div>
       </div>
     </div>
@@ -75,7 +76,7 @@ export function useInvoicePreview(booking: Booking | null, settings: Settings) {
   const downloadButton = (
     <Button onClick={download} disabled={downloading || !booking}>
       <DownloadIcon data-icon="inline-start" />
-      {downloading ? "Preparing…" : "Download PDF"}
+      {downloading ? "Preparing…" : quotation ? "Download Quotation" : "Download PDF"}
     </Button>
   )
 

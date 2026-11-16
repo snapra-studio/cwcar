@@ -129,7 +129,7 @@ function InviteCard({ onLink }: { onLink: (o: InviteOutcome) => void }) {
   const router = useRouter()
   const [email, setEmail] = React.useState("")
   const [name, setName] = React.useState("")
-  const [role, setRole] = React.useState<"admin" | "super_admin">("admin")
+  const [role, setRole] = React.useState<"admin" | "super_admin" | "manager">("admin")
   const [error, setError] = React.useState("")
   const [busy, setBusy] = React.useState(false)
 
@@ -172,9 +172,10 @@ function InviteCard({ onLink }: { onLink: (o: InviteOutcome) => void }) {
           </Field>
           <Field>
             <FieldLabel htmlFor="invRole">Role</FieldLabel>
-            <NativeSelect id="invRole" className="w-full" value={role} onChange={(e) => setRole(e.target.value as "admin" | "super_admin")}>
+            <NativeSelect id="invRole" className="w-full" value={role} onChange={(e) => setRole(e.target.value as "admin" | "super_admin" | "manager")}>
               <NativeSelectOption value="admin">Admin</NativeSelectOption>
               <NativeSelectOption value="super_admin">Super admin</NativeSelectOption>
+              <NativeSelectOption value="manager">Manager (List Hires, inquiries, add income / expenses only)</NativeSelectOption>
             </NativeSelect>
           </Field>
           <Button type="submit" className="rounded-full" disabled={busy}>
@@ -219,6 +220,7 @@ function AdminRow({ a, me, onLink }: { a: AdminView; me: AdminView; onLink: (o: 
               Super admin
             </Badge>
           )}
+          {a.role === "manager" && <Badge variant="secondary">Manager</Badge>}
           {self && <Badge variant="outline">You</Badge>}
           <span className={cn("rounded-full border px-2 py-0.5 text-xs font-medium", STATUS[a.status].className)}>
             {expired ? "Invitation expired" : STATUS[a.status].label}
@@ -281,7 +283,7 @@ function AdminRow({ a, me, onLink }: { a: AdminView; me: AdminView; onLink: (o: 
               {a.status === "active" ? "Suspend" : "Turn back on"}
             </Button>
           )}
-          {(a.status === "active" || a.status === "suspended") && (
+          {(a.status === "active" || a.status === "suspended") && a.role !== "manager" && (
             <ConfirmAction
               trigger={
                 <Button size="sm" variant="outline" className="rounded-full" disabled={busy}>
@@ -300,6 +302,28 @@ function AdminRow({ a, me, onLink }: { a: AdminView; me: AdminView; onLink: (o: 
                 act(
                   () => setRoleAction(a.id, a.role === "super_admin" ? "admin" : "super_admin"),
                   (d) => toast.success(`${d.name || d.email} is now ${d.role === "super_admin" ? "a super admin" : "a regular admin"}`)
+                )
+              }
+            />
+          )}
+          {(a.status === "active" || a.status === "suspended") && a.role !== "super_admin" && (
+            <ConfirmAction
+              trigger={
+                <Button size="sm" variant="outline" className="rounded-full" disabled={busy}>
+                  {a.role === "manager" ? "Make regular admin" : "Make manager"}
+                </Button>
+              }
+              title={a.role === "manager" ? `Make ${a.name || a.email} a regular admin?` : `Make ${a.name || a.email} a manager?`}
+              description={
+                a.role === "manager"
+                  ? "They get the full dashboard again: every hire, cars, partner inquiries and income & expenses."
+                  : "They'll only see List Hires (the last 7 days and the next 30), Create New Inquiry, Manage Inquiries and adding income / expenses — no totals, cars or other sections."
+              }
+              confirmLabel={a.role === "manager" ? "Make regular admin" : "Make manager"}
+              onConfirm={() =>
+                act(
+                  () => setRoleAction(a.id, a.role === "manager" ? "admin" : "manager"),
+                  (d) => toast.success(`${d.name || d.email} is now ${d.role === "manager" ? "a manager" : "a regular admin"}`)
                 )
               }
             />

@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from "react"
 
 import { DEFAULT_SETTINGS } from "@/lib/bridal/logic"
+import type { DateWindow } from "@/lib/bridal/manager"
 import type {
   Booking,
   BookingInput,
@@ -58,6 +59,8 @@ export type BridalState = {
   // Business costs not tied to a hire.
   indirect: IndirectExpense[]
   blocks: CarBlock[]
+  // Managers only: the hire dates they can see (bookings hold only these).
+  window?: DateWindow
 }
 
 const EMPTY: BridalState = {
@@ -125,6 +128,7 @@ async function load() {
     files: data.files ?? [],
     indirect: data.indirect ?? [],
     blocks: data.blocks ?? [],
+    window: ("window" in data ? data.window : undefined) as DateWindow | undefined,
   })
 }
 
@@ -174,6 +178,12 @@ async function call<T>(p: Promise<api.Result<T>>): Promise<T> {
 
 // ---- Bookings ----
 
+// Manager's booking form, for a date outside their window: when each car is
+// taken that day (times only).
+export function busySlots(date: string) {
+  return call(api.busySlotsAction(date))
+}
+
 export async function addBooking(input: BookingInput): Promise<Booking> {
   const b = await call(api.createBookingAction(input))
   patch((s) => ({ bookings: [...s.bookings, b] }))
@@ -188,8 +198,14 @@ export async function updateBooking(id: string, input: BookingInput): Promise<Bo
   return b
 }
 
-export async function cancelBooking(id: string) {
-  const b = await call(api.cancelBookingAction(id))
+export async function cancelBooking(id: string, reason: string) {
+  const b = await call(api.cancelBookingAction(id, reason))
+  patch((s) => ({ bookings: s.bookings.map((x) => (x.id === id ? b : x)) }))
+}
+
+// An incorrect / duplicate hire: off the active list, kept on record.
+export async function removeBooking(id: string, reason: string) {
+  const b = await call(api.removeBookingAction(id, reason))
   patch((s) => ({ bookings: s.bookings.map((x) => (x.id === id ? b : x)) }))
 }
 

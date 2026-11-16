@@ -4,6 +4,7 @@ import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
 import { SESSION_COOKIE } from "@/lib/auth"
+import { MANAGER_HOME, managerMayOpen } from "@/lib/bridal/manager"
 import { startSuperAdminSetup, verifyRecovery, verifySignIn } from "@/lib/server/admins"
 import { ipKey } from "@/lib/server/app-url"
 import { UserError } from "@/lib/server/errors"
@@ -44,7 +45,8 @@ export async function adminSignIn(_prev: AdminLoginState, formData: FormData): P
   }
   clearFailures(`admin:${email}`)
   await setSession(admin.id, "admin")
-  redirect(safeNext(formData.get("next")))
+  const next = safeNext(formData.get("next"))
+  redirect(admin.role === "manager" && !managerMayOpen(next.split("?")[0]) ? MANAGER_HOME : next)
 }
 
 export type SetupStartState = { error?: string; email?: string } | undefined

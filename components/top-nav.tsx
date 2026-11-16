@@ -6,6 +6,8 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   BookOpenIcon,
+  ChartColumnIcon,
+  InboxIcon,
   CalendarDaysIcon,
   CarFrontIcon,
   HandshakeIcon,
@@ -23,6 +25,7 @@ import {
 
 import { logout } from "@/app/admin/login/actions"
 import { ACCOUNT_URL, accountTitle, useAdminMe, type AdminMe } from "@/components/bridal/admin-me"
+import { MANAGER_HOME } from "@/lib/bridal/manager"
 import { useBridal } from "@/lib/bridal/store"
 import { cn } from "@/lib/utils"
 
@@ -35,12 +38,18 @@ export const NAV_ITEMS = [
     description: "Calendar of free and booked cars",
   },
   {
-    title: "New booking",
+    title: "Create New Inquiry",
     url: "/admin/dashboard/bookings/new",
     icon: PlusIcon,
-    description: "Book one or more cars and make the invoice",
+    description: "A customer's request: cars, times and price, then a quotation",
   },
-  { title: "History", url: "/admin/dashboard/history", icon: ListIcon, description: "Past and upcoming hires, Excel export" },
+  {
+    title: "Manage Inquiries",
+    url: "/admin/dashboard/inquiries",
+    icon: InboxIcon,
+    description: "Quotations, confirmations and rejections",
+  },
+  { title: "List Hires", url: "/admin/dashboard/history", icon: ListIcon, description: "Confirmed hires, past and upcoming, Excel export" },
   {
     title: "Income & Expenses",
     url: "/admin/dashboard/finance",
@@ -57,10 +66,31 @@ export const NAV_ITEMS = [
     icon: HandshakeIcon,
     description: "B2B hire inquiries, partner prices and commission",
   },
+  {
+    title: "Monthly Report",
+    url: "/admin/dashboard/reports",
+    icon: ChartColumnIcon,
+    description: "Inquiries, confirmations, rejections and cancellations by month",
+  },
 ]
 
-// The sections this admin may open (Drivers, Customers: super admins only).
-export const navItemsFor = (me: AdminMe | null) => NAV_ITEMS.filter((i) => !("superOnly" in i) || me?.role === "super_admin")
+// A manager's whole menu (see lib/bridal/manager.ts); the server enforces it.
+const MANAGER_ITEMS = [
+  { title: "List Hires", url: MANAGER_HOME, icon: ListIcon, description: "Hires from the last 7 days and the next 30" },
+  {
+    title: "Create New Inquiry",
+    url: "/admin/dashboard/bookings/new",
+    icon: PlusIcon,
+    description: "A customer's request: cars, times and price, then a quotation",
+  },
+  { title: "Manage Inquiries", url: "/admin/dashboard/inquiries", icon: InboxIcon, description: "Quotations, confirmations and rejections" },
+  { title: "Income & Expenses", url: "/admin/dashboard/finance", icon: WalletIcon, description: "Add income or an expense to a hire" },
+]
+
+// The sections this admin may open (Drivers, Customers: super admins only;
+// managers: their own short menu).
+export const navItemsFor = (me: AdminMe | null) =>
+  me?.role === "manager" ? MANAGER_ITEMS : NAV_ITEMS.filter((i) => !("superOnly" in i) || me?.role === "super_admin")
 
 const isActiveLink = (pathname: string, url: string) =>
   url === "/admin/dashboard" ? pathname === url : pathname === url || pathname.startsWith(`${url}/`)
@@ -91,7 +121,7 @@ export function TopNav({ overlay = false }: { overlay?: boolean }) {
       )}
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4">
-        <Link href="/admin/dashboard" className="flex min-w-0 shrink-0 items-center gap-2.5">
+        <Link href={me?.role === "manager" ? MANAGER_HOME : "/admin/dashboard"} className="flex min-w-0 shrink-0 items-center gap-2.5">
           <Image
             src="/logo.png"
             alt="Chrish Wedding Hires"
@@ -125,7 +155,7 @@ export function TopNav({ overlay = false }: { overlay?: boolean }) {
               </Link>
             )
           })}
-          {me && (
+          {me && me.role !== "manager" && (
             <Link
               href={ACCOUNT_URL}
               title={`${accountTitle(me)} · ${me.email}`}
@@ -190,7 +220,7 @@ export function TopNav({ overlay = false }: { overlay?: boolean }) {
                 </li>
               )
             })}
-            {me && (
+            {me && me.role !== "manager" && (
               <li>
                 <Link
                   href={ACCOUNT_URL}

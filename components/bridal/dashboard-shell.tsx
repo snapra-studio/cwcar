@@ -1,13 +1,16 @@
 "use client"
 
-import { usePathname } from "next/navigation"
+import * as React from "react"
+import { usePathname, useRouter } from "next/navigation"
 import { TriangleAlertIcon } from "lucide-react"
 
+import { useAdminMe } from "@/components/bridal/admin-me"
 import { PageTitle } from "@/components/bridal/page-title"
 import { ReminderBanner } from "@/components/bridal/reminder-banner"
 import { TopNav } from "@/components/top-nav"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { MANAGER_HOME, managerMayOpen } from "@/lib/bridal/manager"
 import { useBridal } from "@/lib/bridal/store"
 
 // Shown instead of endless loading skeletons if the data can't be fetched.
@@ -31,6 +34,13 @@ function LoadError({ message }: { message: string }) {
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { error } = useBridal()
+  const me = useAdminMe()
+  const router = useRouter()
+  const blocked = me?.role === "manager" && !managerMayOpen(pathname)
+  React.useEffect(() => {
+    if (blocked) router.replace(MANAGER_HOME)
+  }, [blocked, router])
+  if (blocked) return null
 
   if (pathname === "/admin/dashboard") {
     return (

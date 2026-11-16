@@ -4,6 +4,7 @@ import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
 import { SESSION_COOKIE, readSession, type Session } from "@/lib/auth"
+import { MANAGER_HOME } from "@/lib/bridal/manager"
 import type { Driver } from "@/lib/bridal/types"
 import { getAdmin, type AdminView } from "@/lib/server/admins"
 import { getDriver } from "@/lib/server/repo"
@@ -40,8 +41,19 @@ export async function activeAdmin(session: Session | null): Promise<AdminView | 
 
 // ---- For actions and API routes: throw, the caller turns it into an error. ----
 
-
+// An admin or super admin. Managers (a restricted admin account) are refused
+// here, so every existing admin action and API route stays closed to them;
+// the few things a manager may do use requireStaff() instead.
 export async function requireAdmin(): Promise<AdminView> {
+  const a = await activeAdmin(await currentSession())
+  if (!a || a.role === "manager") throw new Forbidden()
+  return a
+}
+
+// Any active admin account, managers included. Only for the actions a
+// manager is allowed (see lib/bridal/manager.ts); the action itself applies
+// the manager's limits.
+export async function requireStaff(): Promise<AdminView> {
   const a = await activeAdmin(await currentSession())
   if (!a) throw new Forbidden()
   return a
@@ -61,7 +73,16 @@ export async function requireDriver(): Promise<Driver> {
 
 // ---- For server pages/layouts: redirect to the right login instead. ----
 
+// Admin and super admin pages. A manager is sent to their List Hires page.
 export async function adminPage(): Promise<AdminView> {
+  const a = await staffPage()
+  if (a.role === "manager") redirect(MANAGER_HOME)
+  return a
+}
+
+// Pages a manager may also open (List Hires, New booking, Income & Expenses),
+// and the dashboard layout.
+export async function staffPage(): Promise<AdminView> {
   const s = await currentSession()
   if (s?.role === "driver") redirect("/driver/dashboard")
   const a = await activeAdmin(s)

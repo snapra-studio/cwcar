@@ -71,7 +71,7 @@ export async function downloadBookingsExcel(all: Booking[], ledger: LedgerEntry[
       date: dmy(b.date),
       invNo: b.invNo,
       rev: b.revision ?? 1,
-      status: b.status === "cancelled" ? "Cancelled" : "Confirmed",
+      status: b.status === "cancelled" ? "Cancelled" : b.status === "removed" ? "Removed" : "Confirmed",
       type: b.type,
       customer: b.customer,
       phone: b.phone,
@@ -138,7 +138,7 @@ export async function downloadBookingsExcel(all: Booking[], ledger: LedgerEntry[
       const row = trips.addRow({
         date: dmy(b.date),
         invNo: b.invNo,
-        status: b.status === "cancelled" ? "Cancelled" : "Confirmed",
+        status: b.status === "cancelled" ? "Cancelled" : b.status === "removed" ? "Removed" : "Confirmed",
         customer: b.customer,
         phone: b.phone,
         car: c.carName,

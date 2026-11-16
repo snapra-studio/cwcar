@@ -4,7 +4,7 @@ import { z } from "zod"
 
 import type { PartnerRates } from "@/lib/partner/pricing"
 import { UserError } from "@/lib/server/errors"
-import { Forbidden, requireAdmin, requireSuperAdmin } from "@/lib/server/guard"
+import { Forbidden, requireAdmin, requireStaff, requireSuperAdmin } from "@/lib/server/guard"
 import { sendDecisionEmail } from "@/lib/server/partner-emails"
 import {
   amountSchema,
@@ -66,10 +66,10 @@ export async function resendDecisionEmailAction(inquiryId: unknown): Promise<Res
   })
 }
 
-// Every own car's Pricing, for the New booking form.
+// Every own car's Pricing, for the New booking form (managers book too).
 export async function listRatesAction(): Promise<Result<Record<string, PartnerRates>>> {
   return run(async () => {
-    await requireAdmin()
+    await requireStaff()
     return Object.fromEntries((await listPartnerRates()).map((c) => [c.carId, c.rates]))
   })
 }

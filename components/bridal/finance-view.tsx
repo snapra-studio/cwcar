@@ -4,6 +4,7 @@ import * as React from "react"
 import { ChevronDownIcon, MinusCircleIcon, PaperclipIcon, PlusCircleIcon, SearchIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
+import { useAdminMe } from "@/components/bridal/admin-me"
 import { ConfirmAction } from "@/components/bridal/confirm-action"
 import { FilesDialog } from "@/components/bridal/files-dialog"
 import { IndirectExpensesCard, indirectInPeriod } from "@/components/bridal/indirect-expenses"
@@ -32,6 +33,7 @@ import { cn } from "@/lib/utils"
 
 export function FinanceView({ initialHireId }: { initialHireId?: string }) {
   const { ready } = useBridal()
+  const manager = useAdminMe()?.role === "manager"
   if (!ready) {
     return (
       <div className="grid gap-4">
@@ -40,7 +42,16 @@ export function FinanceView({ initialHireId }: { initialHireId?: string }) {
       </div>
     )
   }
-  return <Finance initialHireId={initialHireId} />
+  return manager ? <ManagerEntries initialHireId={initialHireId} /> : <Finance initialHireId={initialHireId} />
+}
+
+// A manager only adds income / expenses to hires in their List Hires: no
+// totals, profit, period summaries or past entries (the server sends them
+// none, and refuses entries for hires outside their window).
+function ManagerEntries({ initialHireId }: { initialHireId?: string }) {
+  const { bookings } = useBridal()
+  const [hireId, setHireId] = React.useState(() => (bookings.some((b) => b.id === initialHireId) ? initialHireId! : ""))
+  return <EntryForm hireId={hireId} onHireChange={setHireId} onAdded={() => {}} />
 }
 
 function Finance({ initialHireId }: { initialHireId?: string }) {

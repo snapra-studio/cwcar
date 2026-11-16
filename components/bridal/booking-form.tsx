@@ -9,6 +9,7 @@ import { toast } from "sonner"
 import { useAdminMe } from "@/components/bridal/admin-me"
 import { CarPhoto } from "@/components/bridal/car-art"
 import { InvoiceDialog } from "@/components/bridal/invoice-dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -32,7 +33,15 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
-import { fmtDate, FRESH_FLOWER_COST, rs, todayIso, uid } from "@/lib/bridal/format"
+import { addDays, fmtDate, FRESH_FLOWER_COST, rs, todayIso, uid } from "@/lib/bridal/format"
+import { createInquiryAction, generateQuotationAction, updateInquiryAction } from "@/lib/server/inquiry-actions"
+
+// Unwraps a server action result (throws its message).
+async function call<T>(p: Promise<{ ok: true; data: T } | { ok: false; error: string }>): Promise<T> {
+  const r = await p
+  if (!r.ok) throw new Error(r.error)
+  return r.data
+}
 import {
   addBooking,
   blocksOn,
@@ -41,6 +50,7 @@ import {
   describeGap,
   fmtMinutes,
   freeGaps,
+  busySlots,
   sortCars,
   toMinutes,
   updateBooking,
@@ -83,7 +93,16 @@ const EMPTY = {
   advance: "0",
 }
 
-type FormProps = { initialDate?: string; initialCarId?: string; bookingId?: string }
+// asInquiry: "Create New Inquiry" — saving makes an inquiry (permanent
+// reference, Pending Quotation), not a booking. With `inquiry`, edits that
+// inquiry. Without either, the form edits a confirmed hire (bookingId).
+type FormProps = {
+  initialDate?: string
+  initialCarId?: string
+  bookingId?: string
+  asInquiry?: boolean
+  inquiry?: { id: string; ref: string; input: BookingInput }
+}
 
 export function BookingForm(props: FormProps) {
   const { ready, bookings } = useBridal()
@@ -95,7 +114,12 @@ export function BookingForm(props: FormProps) {
       </div>
     )
   }
-  const editing = props.bookingId ? bookings.find((b) => b.id === props.bookingId) : undefined
+  // An inquiry being edited fills the form like a booking would.
+  const editing = props.inquiry
+    ? ({ ...props.inquiry.input, id: props.inquiry.id, invNo: props.inquiry.ref, createdAt: "", status: "confirmed" } as Booking)
+    : props.bookingId
+      ? bookings.find((b) => b.id === props.bookingId)
+      : undefined
   if (props.bookingId && !editing) {
     return (
       <Card>
@@ -122,11 +146,43 @@ function BookingFormInner({
   initialDate,
   initialCarId,
   editing,
+  asInquiry,
+  inquiry,
 }: FormProps & { editing?: Booking }) {
-  const { cars, bookings, drivers, blocks } = useBridal()
+  // Just created: the new inquiry's reference, for the success window.
+  const [created, setCreated] = React.useState<{ id: string; ref: string } | null>(null)
+  const [quoting, setQuoting] = React.useState(false)
+  const { cars, bookings, drivers, blocks, window } = useBridal()
   const router = useRouter()
   const [saving, setSaving] = React.useState(false)
   const [date, setDate] = React.useState(editing?.date || initialDate || todayIso)
+  // A manager's bookings list only covers their window. For a date outside it
+  // (or the day before, for overnight hires), ask the server when each car is
+  // taken: times only, no customer details.
+  const manager = useAdminMe()?.role === "manager"
+  const needBusy = manager && !!date && (!window || addDays(date, -1) < window.from || date > window.to)
+  const [busy, setBusy] = React.useState<{ date: string; list: Booking[] } | null>(null)
+  React.useEffect(() => {
+    if (!needBusy) return
+    let live = true
+    busySlots(date)
+      .then((rows) => {
+        const byBooking = new Map<string, Booking>()
+        for (const r of rows) {
+          const b =
+            byBooking.get(r.bookingId) ??
+            ({ id: r.bookingId, invNo: "another hire", status: "confirmed", date: r.date, cars: [] } as unknown as Booking)
+          b.cars.push({ carId: r.carId, pickupTime: r.pickupTime, dropTime: r.dropTime } as Booking["cars"][number])
+          byBooking.set(r.bookingId, b)
+        }
+        if (live) setBusy({ date, list: [...byBooking.values()] })
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [needBusy, date])
+  const known = needBusy && busy?.date === date ? [...bookings, ...busy.list.filter((x) => !bookings.some((b) => b.id === x.id))] : bookings
   // Selected cars in the order they were picked, each with its own hire
   // amount and route.
   const [picked, setPicked] = React.useState<PickedCar[]>(() => {
@@ -198,7 +254,7 @@ function BookingFormInner({
   const allCars = [...sortCars(cars), ...removedCars]
   // This car's other active hires on the chosen date (not counting the
   // booking being edited), as time slots.
-  const daySlots = (carId: string) => carSlotsOn(bookings, carId, date, editing?.id)
+  const daySlots = (carId: string) => carSlotsOn(known, carId, date, editing?.id)
   // Times this car is marked unavailable (repair…) on the chosen date.
   const dayBlocks = (carId: string) => blocksOn(blocks, carId, date)
   const slotText = (x: { start: number; end: number }) => `${fmtMinutes(x.start)} – ${fmtMinutes(x.end)}`
@@ -361,7 +417,17 @@ function BookingFormInner({
         advance,
         balance,
       }
-      if (editing) {
+      if (asInquiry || inquiry) {
+        if (inquiry) {
+          await call(updateInquiryAction(inquiry.id, input))
+          toast.success(`${inquiry.ref} updated`)
+          router.push(`/admin/dashboard/inquiries?open=${encodeURIComponent(inquiry.id)}`)
+        } else {
+          const made = await call(createInquiryAction(input))
+          reset()
+          setCreated(made)
+        }
+      } else if (editing) {
         const booking = await updateBooking(editing.id, input)
         toast.success(`Booking updated · invoice revision ${booking.revision}`)
         setInvoice(booking)
@@ -697,11 +763,19 @@ function BookingFormInner({
 
               <Field orientation="horizontal">
                 <Button type="submit" size="lg" className="rounded-full px-5" disabled={saving}>
-                  {saving ? "Saving…" : editing ? "Save changes & update invoice" : "Save & create invoice"}
+                  {saving
+                    ? "Saving…"
+                    : inquiry
+                      ? "Save inquiry changes"
+                      : asInquiry
+                        ? "Create inquiry"
+                        : editing
+                          ? "Save changes & update invoice"
+                          : "Save & create invoice"}
                 </Button>
                 {editing ? (
                   <Button asChild size="lg" variant="outline" className="rounded-full px-5">
-                    <Link href="/admin/dashboard/history">Cancel</Link>
+                    <Link href={inquiry ? "/admin/dashboard/inquiries" : "/admin/dashboard/history"}>Cancel</Link>
                   </Button>
                 ) : (
                   <Button type="button" size="lg" variant="outline" className="rounded-full px-5" onClick={reset}>
@@ -760,6 +834,42 @@ function BookingFormInner({
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={!!created} onOpenChange={(o) => !o && !quoting && setCreated(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Inquiry {created?.ref} created</DialogTitle>
+            <DialogDescription>
+              Status: <strong>Pending Quotation</strong>. No car is reserved until the customer confirms and the inquiry is converted to a hire.
+              Keep using <strong className="font-mono">{created?.ref}</strong> as the reference — it never changes.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setCreated(null)} disabled={quoting}>
+              Create another
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href={`/admin/dashboard/inquiries?open=${encodeURIComponent(created?.id ?? "")}`}>Manage Inquiries</Link>
+            </Button>
+            <Button
+              disabled={quoting}
+              onClick={async () => {
+                if (!created) return
+                setQuoting(true)
+                try {
+                  await call(generateQuotationAction(created.id))
+                  router.push(`/admin/dashboard/inquiries?open=${encodeURIComponent(created.id)}&quote=1`)
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Could not generate the quotation.")
+                  setQuoting(false)
+                }
+              }}
+            >
+              {quoting ? "Generating…" : "Generate quotation"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <InvoiceDialog
         booking={invoice}

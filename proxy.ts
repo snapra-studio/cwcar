@@ -38,7 +38,11 @@ export function proxy(request: NextRequest) {
 
   // Signed-in pages must not be kept by the browser, so after logging out the
   // Back button asks the server again (and gets sent to the login page).
-  const res = NextResponse.next()
+  // x-pathname: the page asked for, for the dashboard layout's manager check
+  // (always set here, so a visitor can't supply their own).
+  const forwarded = new Headers(request.headers)
+  forwarded.set("x-pathname", pathname)
+  const res = NextResponse.next({ request: { headers: forwarded } })
   res.headers.set("Cache-Control", "no-store, max-age=0")
   return res
 }

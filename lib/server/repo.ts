@@ -14,7 +14,18 @@ import {
   upgradeSettings,
   type LegacyBooking,
 } from "@/lib/bridal/logic"
-import type { BookedCar, Booking, Car, CarBlock, Driver, DriverStatus, IndirectExpense, LedgerEntry, Settings } from "@/lib/bridal/types"
+import type {
+  BookedCar,
+  Booking,
+  Car,
+  CarBlock,
+  Driver,
+  DriverStatus,
+  FileMeta,
+  IndirectExpense,
+  LedgerEntry,
+  Settings,
+} from "@/lib/bridal/types"
 import { isUniqueViolation, q, tx, type Db, type Row } from "@/lib/server/db"
 import { UserError } from "@/lib/server/errors"
 import { deleteFilesOf, deletePhotoUrl, listAllDocs, resolvePhoto } from "@/lib/server/files"
@@ -84,6 +95,10 @@ function toBooking(r: Row): Booking {
   return {
     id: String(r.id),
     invNo: String(r.inv_no),
+    inquiryId: str(r.inquiry_id),
+    closedReason: str(r.closed_reason) || undefined,
+    closedAt: str(r.closed_at),
+    closedBy: str(r.closed_by),
     createdAt: String(r.created_at),
     updatedAt: str(r.updated_at),
     revision: Number(r.revision ?? 1),
@@ -207,6 +222,65 @@ export async function setCoverVideo(url: string | undefined, from: "upload" | "f
     : await mergeSettings({ coverVideoFrom: "none" }, ["coverVideo"])
   if (old && old !== url) await deletePhotoUrl(old)
   return next
+}
+
+// ---- Manager snapshot ---------------------------------------------------------
+
+// What a manager's screens get: the fleet, car unavailability and drivers
+// (for the booking form), the invoice details, and only the hires inside
+// their date window. No income / expense records, documents or overheads.
+// The window is applied here in the database query, so hires outside it
+// never leave the server.
+export async function getManagerState(window: { from: string; to: string }) {
+  const [cars, bookings, settings, drivers, blocks] = await Promise.all([
+    q("SELECT * FROM cars ORDER BY name"),
+    loadBookings("WHERE b.date BETWEEN $1 AND $2 AND b.status = 'confirmed'", [window.from, window.to]),
+    getInvoiceSettings(),
+    listDrivers(),
+    listBlocks(),
+  ])
+  return {
+    initialized: true,
+    cars: cars.map(toCar),
+    bookings,
+    ledger: [] as LedgerEntry[],
+    settings,
+    drivers,
+    files: [] as FileMeta[],
+    indirect: [] as IndirectExpense[],
+    blocks,
+    window,
+  }
+}
+
+// When each car is taken on `date` (and overnight from the day before), for
+// a manager's booking form on dates outside their window: times only, no
+// customer, invoice or money details.
+export async function busySlots(date: string) {
+  const rows = await q(
+    `SELECT b.id, b.date, bc.car_id, bc.pickup_time, bc.drop_time
+     FROM booking_cars bc JOIN bookings b ON b.id = bc.booking_id
+     WHERE b.status = 'confirmed' AND b.date BETWEEN ($1::date - 1) AND $1::date`,
+    [date]
+  )
+  return rows.map((r) => ({
+    bookingId: String(r.id),
+    date: String(r.date),
+    carId: String(r.car_id),
+    pickupTime: String(r.pickup_time ?? ""),
+    dropTime: String(r.drop_time ?? ""),
+  }))
+}
+
+// Is this hire (not cancelled) dated inside the window? For a manager adding
+// income / expenses.
+export async function bookingInWindow(id: string, window: { from: string; to: string }) {
+  const rows = await q(`SELECT 1 FROM bookings WHERE id = $1 AND status = 'confirmed' AND date BETWEEN $2 AND $3`, [
+    id,
+    window.from,
+    window.to,
+  ])
+  return rows.length > 0
 }
 
 // ---- Admin snapshot -----------------------------------------------------------
@@ -461,13 +535,20 @@ export async function createBooking(input: BookingInput): Promise<Booking> {
 // One new booking inside the caller's transaction (the normal save above, and
 // approving a partner inquiry): the same checks — cars exist, no overlapping
 // hire or unavailable period under the per-car lock — and the same rows.
-// `extra.partnerInquiryId` links a booking made from a partner inquiry.
-export async function insertBooking(db: Db, input: BookingInput, attempt = 0, extra: { partnerInquiryId?: string } = {}): Promise<Booking> {
+// `extra.partnerInquiryId` links a booking made from a partner inquiry;
+// `extra.inquiry` makes the hire of a confirmed inquiry, numbered with the
+// inquiry's permanent reference instead of a new number.
+export async function insertBooking(
+  db: Db,
+  input: BookingInput,
+  attempt = 0,
+  extra: { partnerInquiryId?: string; inquiry?: { id: string; ref: string } } = {}
+): Promise<Booking> {
           const checks = await bookingChecks(db, input, "")
           const money = validate(input, checks)
           const id = uid()
           const createdAt = new Date().toISOString()
-          const invNo = invNoFor(input.date, checks.yearCount + 1 + attempt, id)
+          const invNo = extra.inquiry?.ref ?? invNoFor(input.date, checks.yearCount + 1 + attempt, id)
           await db.query(
             `INSERT INTO bookings (id, inv_no, created_at, revision, status, date, type, customer, phone, address, deco,
                rate, deco_cost, total, advance, balance, discount, deco_notes)
@@ -495,9 +576,11 @@ export async function insertBooking(db: Db, input: BookingInput, attempt = 0, ex
           if (extra.partnerInquiryId) {
             await db.query("UPDATE bookings SET partner_inquiry_id = $2 WHERE id = $1", [id, extra.partnerInquiryId])
           }
+          if (extra.inquiry) await db.query("UPDATE bookings SET inquiry_id = $2 WHERE id = $1", [id, extra.inquiry.id])
           return {
             id,
             invNo,
+            ...(extra.inquiry && { inquiryId: extra.inquiry.id }),
             createdAt,
             revision: 1,
             status: "confirmed",
@@ -523,7 +606,7 @@ export async function updateBooking(id: string, input: BookingInput): Promise<Bo
       const locked = await db.query("SELECT id FROM bookings WHERE id = $1 FOR UPDATE", [id])
       if (!locked.rowCount) throw new UserError("That booking no longer exists.")
       const [existing] = await loadBookings("WHERE b.id = $1", [id], db)
-      if (existing.status === "cancelled") throw new UserError("A cancelled booking can't be edited.")
+      if (existing.status !== "confirmed") throw new UserError(`A ${existing.status} booking can't be edited.`)
       const money = validate(input, await bookingChecks(db, input, id), existing)
       const updatedAt = new Date().toISOString()
       await db.query(
@@ -573,16 +656,47 @@ export async function updateBooking(id: string, input: BookingInput): Promise<Bo
 }
 
 // Cancelled hires stay on record but free their cars.
-export async function cancelBooking(id: string): Promise<Booking> {
-  await q(
-    `WITH b AS (UPDATE bookings SET status = 'cancelled' WHERE id = $1 RETURNING id)
-     UPDATE booking_cars SET active = false WHERE booking_id IN (SELECT id FROM b)
-     RETURNING booking_id`,
-    [id]
-  )
+// Cancelled (the customer called it off) or removed (an incorrect /
+// duplicate entry): the hire stays on record with the reason, who and when;
+// its cars are freed. Only a confirmed hire can be closed.
+export async function closeBooking(id: string, to: "cancelled" | "removed", reason: string, actor: string): Promise<Booking> {
+  await tx(async (db) => {
+    const { rows } = await db.query("SELECT id, inv_no, inquiry_id, status, total FROM bookings WHERE id = $1 FOR UPDATE", [id])
+    const b = rows[0]
+    if (!b) throw new UserError("That booking no longer exists.")
+    if (b.status !== "confirmed") throw new UserError(`This hire is already ${b.status}.`)
+    await db.query(
+      `UPDATE bookings SET status = $2, closed_reason = $3, closed_at = now(), closed_by = $4 WHERE id = $1`,
+      [id, to, reason, actor]
+    )
+    await db.query("UPDATE booking_cars SET active = false WHERE booking_id = $1", [id])
+    await logEvent(db, {
+      ref: String(b.inv_no),
+      inquiryId: str(b.inquiry_id),
+      bookingId: id,
+      action: to,
+      prev: "confirmed",
+      next: to,
+      amount: Number(b.total),
+      reason,
+      actor,
+    })
+  })
   const booking = await getBooking(id)
   if (!booking) throw new UserError("That booking no longer exists.")
   return booking
+}
+
+// One audit-trail record (booking_events is append-only).
+export async function logEvent(
+  db: Db,
+  e: { ref: string; inquiryId?: string; bookingId?: string; action: string; prev?: string; next?: string; amount?: number; reason?: string; actor: string }
+) {
+  await db.query(
+    `INSERT INTO booking_events (ref, inquiry_id, booking_id, action, prev_status, new_status, amount, reason, actor)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [e.ref, e.inquiryId ?? null, e.bookingId ?? null, e.action, e.prev ?? null, e.next ?? null, e.amount ?? null, e.reason ?? "", e.actor]
+  )
 }
 
 // ---- Ledger -------------------------------------------------------------------
@@ -683,7 +797,7 @@ const scopeToDriver = (b: Booking, driverId: string): DriverHire => ({
 // Hires from `fromDate` on where this driver drives at least one car.
 export async function getDriverHires(driverId: string, fromDate: string): Promise<DriverHire[]> {
   const hires = await loadBookings(
-    "WHERE b.date >= $1 AND EXISTS (SELECT 1 FROM booking_cars x WHERE x.booking_id = b.id AND x.driver_id = $2)",
+    "WHERE b.date >= $1 AND b.status <> 'removed' AND EXISTS (SELECT 1 FROM booking_cars x WHERE x.booking_id = b.id AND x.driver_id = $2)",
     [fromDate, driverId]
   )
   return hires.map((b) => scopeToDriver(b, driverId))
@@ -692,7 +806,7 @@ export async function getDriverHires(driverId: string, fromDate: string): Promis
 // One hire, only if this driver is on it; otherwise undefined (callers 404).
 export async function getDriverHire(driverId: string, bookingId: string): Promise<DriverHire | undefined> {
   const [b] = await loadBookings(
-    "WHERE b.id = $1 AND EXISTS (SELECT 1 FROM booking_cars x WHERE x.booking_id = b.id AND x.driver_id = $2)",
+    "WHERE b.id = $1 AND b.status <> 'removed' AND EXISTS (SELECT 1 FROM booking_cars x WHERE x.booking_id = b.id AND x.driver_id = $2)",
     [bookingId, driverId]
   )
   return b ? scopeToDriver(b, driverId) : undefined

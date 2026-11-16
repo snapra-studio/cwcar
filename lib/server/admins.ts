@@ -28,7 +28,9 @@ import {
 //   admin        invited by email -> sets up the app from the link ->
 //                "pending" until a super admin approves -> "active".
 
-export type AdminRole = "super_admin" | "admin"
+// manager: a restricted account (List Hires, New booking, adding income /
+// expenses only); see lib/bridal/manager.ts.
+export type AdminRole = "super_admin" | "admin" | "manager"
 export type AdminStatus = "invited" | "pending" | "active" | "suspended"
 
 export type AdminView = {
@@ -155,11 +157,15 @@ export async function setRole(id: string, actorId: string, role: AdminRole) {
   await target(id, actorId)
   const [r] = await q(
     `UPDATE admins SET role = $2, updated_at = now(),
-       recovery_hashes = CASE WHEN $2 = 'admin' THEN '{}' ELSE recovery_hashes END
+       recovery_hashes = CASE WHEN $2 <> 'super_admin' THEN '{}' ELSE recovery_hashes END
      WHERE id = $1 AND role <> $2 RETURNING *`,
     [id, role]
   )
-  if (!r) throw new UserError(role === "super_admin" ? "They're already a super admin." : "They're already a regular admin.")
+  if (!r) {
+    throw new UserError(
+      role === "super_admin" ? "They're already a super admin." : role === "manager" ? "They're already a manager." : "They're already a regular admin."
+    )
+  }
   return toView(r)
 }
 

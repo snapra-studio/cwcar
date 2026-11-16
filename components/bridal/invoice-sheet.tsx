@@ -112,6 +112,13 @@ function Rows({
   )
 }
 
+// Quotation terms (followed by the invoice's notes on extra time and route).
+const QUOTE_NOTES = (validUntil: string) => [
+  `This quotation is valid until ${slashDate(validUntil)}. Prices may change after that date.`,
+  "This is a quotation, not a confirmed booking. The vehicles are reserved only once you confirm and the hire is confirmed by us, subject to availability at that time.",
+  "A 50% advance payment confirms the booking; the balance is due before the event date.",
+]
+
 const NOTES = [
   "Booking is confirmed only after advance payment of 50%.",
   "Balance payment due before the event date.",
@@ -121,13 +128,21 @@ const NOTES = [
   "Deviation of the pre-agreed route will cause additional charges (LKR 400 per kilometer).",
 ]
 
+// Before the customer confirms, the same sheet is the quotation: titled
+// QUOTATION, numbered with the inquiry's permanent reference (b.invNo), with
+// its issue and valid-until dates and quotation terms, and the quoted total
+// in place of advance / balance due.
+export type QuotationInfo = { issued: string; validUntil: string }
+
 export function InvoiceSheet({
   booking: b,
   settings,
+  quotation,
   ref,
 }: {
   booking: Booking
   settings: Settings
+  quotation?: QuotationInfo
   ref?: React.Ref<HTMLDivElement>
 }) {
   const items = lineItems(b)
@@ -136,8 +151,12 @@ export function InvoiceSheet({
   const summary: [string, string][] = [
     ["Subtotal / Hire Amount", num(money.subtotal)],
     ...(money.discount > 0 ? ([["Discount", `(${num(money.discount)})`]] as [string, string][]) : []),
-    ["Total", num(money.total)],
-    ["Advance Paid", b.advance ? `(${num(b.advance)})` : "0"],
+    ...(quotation
+      ? []
+      : ([
+          ["Total", num(money.total)],
+          ["Advance Paid", b.advance ? `(${num(b.advance)})` : "0"],
+        ] as [string, string][])),
   ]
   const SUMMARY_H = summaryHeight(summary.length)
   const rev = b.revision ?? 1
@@ -160,12 +179,12 @@ export function InvoiceSheet({
       style={{ width: SHEET_W, minHeight: SHEET_H, color: INK }}
     >
       <div className="absolute text-right" style={{ top: 16, right: 33 }}>
-        <div className="text-[38px] leading-none font-normal tracking-[0.01em]">INVOICE</div>
-        {b.status === "cancelled" && (
-          <div className="mt-1 text-[12px] font-bold tracking-widest text-[#B91C1C]">CANCELLED</div>
+        <div className="text-[38px] leading-none font-normal tracking-[0.01em]">{quotation ? "QUOTATION" : "INVOICE"}</div>
+        {b.status !== "confirmed" && (
+          <div className="mt-1 text-[12px] font-bold tracking-widest text-[#B91C1C]">{b.status === "removed" ? "REMOVED" : "CANCELLED"}</div>
         )}
-        {b.status !== "cancelled" && rev > 1 && (
-          <div className="mt-1 text-[12px] font-bold tracking-widest">REVISED · REV {rev}</div>
+        {b.status === "confirmed" && rev > 1 && (
+          <div className="mt-1 text-[12px] font-bold tracking-widest">{quotation ? `VERSION ${rev}` : `REVISED · REV ${rev}`}</div>
         )}
       </div>
 
@@ -196,11 +215,20 @@ export function InvoiceSheet({
           <Rows
             labelWidth={158}
             rowHeight={26}
-            rows={[
-              ["Invoice No.", rev > 1 ? `${b.invNo} (Rev ${rev})` : b.invNo],
-              ["Date", slashDate((b.updatedAt ?? b.createdAt).slice(0, 10))],
-              ["Due Date", slashDate(b.date)],
-            ]}
+            rows={
+              quotation
+                ? [
+                    ["Quotation No.", rev > 1 ? `${b.invNo} (v${rev})` : b.invNo],
+                    ["Issue Date", slashDate(quotation.issued)],
+                    ["Valid Until", slashDate(quotation.validUntil)],
+                    ["Hire Date", slashDate(b.date)],
+                  ]
+                : [
+                    ["Invoice No.", rev > 1 ? `${b.invNo} (Rev ${rev})` : b.invNo],
+                    ["Date", slashDate((b.updatedAt ?? b.createdAt).slice(0, 10))],
+                    ["Due Date", slashDate(b.date)],
+                  ]
+            }
           />
         </div>
         <div className="min-w-0 flex-1 pr-6">
@@ -277,12 +305,12 @@ export function InvoiceSheet({
           </div>
 
           <div className="absolute inset-x-0 flex items-center" style={{ top: BODY_H, height: 45 }}>
-            <div className="text-right font-bold" style={{ width: 470 }}>Balance Due</div>
+            <div className="text-right font-bold" style={{ width: 470 }}>{quotation ? "Total Quotation" : "Balance Due"}</div>
             <div
               className="flex h-full items-center justify-end font-bold text-white"
               style={{ marginLeft: 42, width: 170, paddingRight: 54, background: HEAD }}
             >
-              {num(b.balance)}
+              {num(quotation ? money.total : b.balance)}
             </div>
           </div>
         </div>
@@ -323,7 +351,7 @@ export function InvoiceSheet({
       <div style={{ marginTop: 12, marginLeft: 68 }}>
         <div>Notes</div>
         <ul className="mt-1 list-disc text-[11px] leading-[15px]" style={{ paddingLeft: 60, paddingRight: 56 }}>
-          {NOTES.map((n) => (
+          {(quotation ? [...QUOTE_NOTES(quotation.validUntil), ...NOTES.slice(2)] : NOTES).map((n) => (
             <li key={n}>{n}</li>
           ))}
         </ul>

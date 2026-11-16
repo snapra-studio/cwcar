@@ -23,7 +23,8 @@ export const DEMO_CARS: Car[] = [
   { id: "rr-silver", name: "Range Rover Sport", color: "Silver", hex: "#B9BEC4", style: "suv", plate: "CAH-8800", rate: 55000 },
 ]
 
-export const isActive = (b: Booking) => b.status !== "cancelled"
+// A live hire: confirmed (not cancelled or removed).
+export const isActive = (b: Booking) => b.status === "confirmed"
 
 // ---- Time-based availability ------------------------------------------------
 // A car is blocked only for each hire's own time slot (pick-up to drop-off),
@@ -181,7 +182,7 @@ export function hireMoney(b: Booking, ledger: LedgerEntry[]) {
 // Status shown to drivers and in lists; derived from the stored status and date.
 export type HireStatus = "cancelled" | "completed" | "today" | "upcoming"
 export function hireStatus(b: Pick<Booking, "status" | "date">, today: string): HireStatus {
-  if (b.status === "cancelled") return "cancelled"
+  if (b.status !== "confirmed") return "cancelled"
   if (b.date < today) return "completed"
   return b.date === today ? "today" : "upcoming"
 }
