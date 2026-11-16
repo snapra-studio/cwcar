@@ -5,7 +5,7 @@ import * as React from "react"
 // Who is signed in to the admin area (set by the dashboard layout on the
 // server). Only for showing the right links: every action is still checked
 // on the server.
-export type AdminMe = { id: string; email: string; name: string; role: "super_admin" | "admin" }
+export type AdminMe = { id: string; email: string; name: string; role: "super_admin" | "admin" | "manager" }
 
 const Ctx = React.createContext<AdminMe | null>(null)
 

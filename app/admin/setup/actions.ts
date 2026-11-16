@@ -7,7 +7,7 @@ import { layout, sendMail } from "@/lib/server/mailer"
 import { isLocked, pause, recordFailure } from "@/lib/server/rate-limit"
 
 export type SetupResult =
-  | { ok: true; role: "super_admin" | "admin"; approved: boolean; recoveryCodes: string[] }
+  | { ok: true; role: "super_admin" | "admin" | "manager"; approved: boolean; recoveryCodes: string[] }
   | { ok: false; error: string }
 
 // The first code from the app finishes setup. The super admin is shown

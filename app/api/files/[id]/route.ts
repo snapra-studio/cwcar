@@ -13,6 +13,7 @@ import { getObject } from "@/lib/server/storage"
 //   hire files (booking)        admin, or a driver assigned to that hire
 //   receipts, vehicle papers    admin only
 //   driver papers               super admin only
+//   (managers: none of the above, only the public files)
 // Anyone else gets 404, so the response never confirms a file exists.
 // Bytes are streamed from storage; the storage address is never revealed.
 const PUBLIC: FileMeta["ownerType"][] = ["car_image", "cover", "cover_video", "brochure"]
@@ -22,7 +23,8 @@ async function canRead(meta: FileMeta) {
   const session = await currentSession()
   if (session?.role === "admin") {
     const admin = await activeAdmin(session)
-    return !!admin && (meta.ownerType !== "driver_doc" || admin.role === "super_admin")
+    if (!admin || admin.role === "manager") return false
+    return meta.ownerType !== "driver_doc" || admin.role === "super_admin"
   }
   if (session?.role === "driver" && meta.ownerType === "booking") {
     const driver = await getDriver(session.sub)

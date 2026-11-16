@@ -125,13 +125,22 @@ export const INCOME_CATEGORIES = ["Extra hours", "Extra kilometres", "Waiting ch
 
 export type Booking = {
   id: string
+  // The hire's reference on the list, invoice and reports. Hires made from an
+  // inquiry keep the inquiry's permanent reference (INQ-2026-0001).
   invNo: string
+  // The inquiry this hire was confirmed from, if any.
+  inquiryId?: string
+  // Why / when / by whom it was cancelled or removed.
+  closedReason?: string
+  closedAt?: string
+  closedBy?: string
   createdAt: string
   // Bumped each time the order is edited, so re-issued invoices are told
   // apart (1 = original invoice).
   revision?: number
   updatedAt?: string
-  status: "confirmed" | "cancelled"
+  // removed: taken off the list by an admin (wrong / duplicate entry).
+  status: "confirmed" | "cancelled" | "removed"
   date: string
   cars: BookedCar[]
   type: EventType

@@ -4,6 +4,7 @@ import * as React from "react"
 import { CalendarIcon, FileSpreadsheetIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { useAdminMe } from "@/components/bridal/admin-me"
 import { BookingRow } from "@/components/bridal/booking-row"
 import { InvoiceDialog } from "@/components/bridal/invoice-dialog"
 import { Button } from "@/components/ui/button"
@@ -11,6 +12,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { ItemGroup } from "@/components/ui/item"
 import { Skeleton } from "@/components/ui/skeleton"
 import { fmtDate, monthRange, todayIso } from "@/lib/bridal/format"
@@ -111,8 +113,47 @@ function ExportCard() {
   )
 }
 
-function History() {
+// Cancelled and removed hires (admins), newest first, by status.
+function ClosedHires({ onInvoice }: { onInvoice: (b: Booking) => void }) {
   const { cars, bookings } = useBridal()
+  const [status, setStatus] = React.useState<"all" | "cancelled" | "removed">("all")
+  const closed = bookings
+    .filter((b) => b.status !== "confirmed" && (status === "all" || b.status === status))
+    .sort((a, b) => (b.closedAt ?? b.date).localeCompare(a.closedAt ?? a.date))
+    .slice(0, 30)
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">Cancelled &amp; removed</CardTitle>
+        <CardDescription>Kept on record with the reason, for the reports. They don&apos;t reserve any car.</CardDescription>
+        <CardAction>
+          <NativeSelect aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
+            <NativeSelectOption value="all">Cancelled and removed</NativeSelectOption>
+            <NativeSelectOption value="cancelled">Cancelled</NativeSelectOption>
+            <NativeSelectOption value="removed">Removed</NativeSelectOption>
+          </NativeSelect>
+        </CardAction>
+      </CardHeader>
+      <CardContent>
+        {closed.length ? (
+          <ItemGroup className="gap-2">
+            {closed.map((b) => (
+              <BookingRow key={b.id} booking={b} cars={b.cars.map((c) => cars.find((x) => x.id === c.carId))} onInvoice={onInvoice} />
+            ))}
+          </ItemGroup>
+        ) : (
+          <NoBookings>None.</NoBookings>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function History() {
+  const { cars, bookings, window } = useBridal()
+  // Managers see only hires in their window (the server sends no others), no
+  // Excel export (it holds income, expenses and profit).
+  const manager = useAdminMe()?.role === "manager"
   const [day, setDay] = React.useState(todayIso)
   const [invoice, setInvoice] = React.useState<Booking | null>(null)
 
@@ -133,6 +174,12 @@ function History() {
 
   return (
     <div className="grid gap-4">
+      {manager && window && (
+        <p className="rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
+          Showing hires from <strong className="text-foreground">{fmtDate(window.from)}</strong> to{" "}
+          <strong className="text-foreground">{fmtDate(window.to)}</strong> — the last 7 days and the next 30.
+        </p>
+      )}
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">{fmtDate(day)}</CardTitle>
@@ -141,6 +188,8 @@ function History() {
               type="date"
               aria-label="Day"
               className="w-auto"
+              min={manager ? window?.from : undefined}
+              max={manager ? window?.to : undefined}
               value={day}
               onChange={(e) => e.target.value && setDay(e.target.value)}
             />
@@ -174,7 +223,7 @@ function History() {
               ))}
             </ItemGroup>
           ) : (
-            <NoBookings>No upcoming hires. Add one from New booking.</NoBookings>
+            <NoBookings>No upcoming hires. Confirm one from Manage Inquiries.</NoBookings>
           )}
         </CardContent>
       </Card>
@@ -182,7 +231,9 @@ function History() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Completed</CardTitle>
-          <CardDescription>The latest hires whose date has passed. Use Download Excel for older ones.</CardDescription>
+          <CardDescription>
+            {manager ? "Hires from the last 7 days whose date has passed." : "The latest hires whose date has passed. Use Download Excel for older ones."}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {completed.length ? (
@@ -197,7 +248,9 @@ function History() {
         </CardContent>
       </Card>
 
-      <ExportCard />
+      {!manager && <ClosedHires onInvoice={setInvoice} />}
+
+      {!manager && <ExportCard />}
 
       <InvoiceDialog booking={invoice} onOpenChange={(open) => !open && setInvoice(null)} />
     </div>

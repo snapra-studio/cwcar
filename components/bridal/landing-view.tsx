@@ -108,7 +108,7 @@ function Landing() {
             <div className="flex flex-wrap gap-3">
               <Button asChild size="lg" className="h-11 rounded-full px-6 text-sm shadow-lg shadow-black/30">
                 <Link href="/admin/dashboard/bookings/new">
-                  New booking
+                  Create New Inquiry
                   <ArrowRightIcon data-icon="inline-end" />
                 </Link>
               </Button>
@@ -228,7 +228,7 @@ function UpcomingPanel({ upcoming, onInvoice }: { upcoming: Booking[]; onInvoice
         <div className="grid justify-items-start gap-3 py-2 text-sm text-white/80">
           No upcoming hires yet.
           <Button asChild size="sm" className="rounded-full">
-            <Link href="/admin/dashboard/bookings/new">New booking</Link>
+            <Link href="/admin/dashboard/bookings/new">Create New Inquiry</Link>
           </Button>
         </div>
       ) : (

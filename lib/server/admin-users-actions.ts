@@ -43,9 +43,9 @@ const id = z.string().min(1).max(80)
 const inviteSchema = z.object({
   email: z.string().trim().toLowerCase().email("Enter a valid email address").max(200),
   name: z.string().trim().max(80),
-  role: z.enum(["admin", "super_admin"]).default("admin"),
+  role: z.enum(["admin", "super_admin", "manager"]).default("admin"),
 })
-const role = z.enum(["admin", "super_admin"])
+const role = z.enum(["admin", "super_admin", "manager"])
 
 // What the super admin sees after inviting: whether the email went out, and
 // the link to copy if it didn't (no SMTP yet, or the server refused).
@@ -65,7 +65,13 @@ async function sendInvite(admin: AdminView, token: string, inviter: AdminView, a
       lines: [
         again
           ? `${who} sent you a new link to set up sign-in for the Chrish Wedding Cars bookings dashboard.`
-          : `${who} has added you as ${admin.role === "super_admin" ? "a super admin (you can also add and approve other admins)" : "an admin"} of the Chrish Wedding Cars bookings dashboard.`,
+          : `${who} has added you as ${
+              admin.role === "super_admin"
+                ? "a super admin (you can also add and approve other admins)"
+                : admin.role === "manager"
+                  ? "a manager (you can list hires, create and manage inquiries and add income and expenses)"
+                  : "an admin"
+            } of the Chrish Wedding Cars bookings dashboard.`,
         "Sign-in uses the Google Authenticator app on your phone instead of a password. Open the link below, scan the QR code with the app, and type the 6-digit code it shows.",
         "After that, your account is approved by the business owner. The link can be used once and expires in 3 days.",
       ],

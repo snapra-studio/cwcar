@@ -5,7 +5,7 @@ import { z } from "zod"
 // Input validation for every write. Anything the browser sends is checked
 // here before it reaches the database.
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date")
+export const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date")
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a HH:MM time")
 const optTime = z.union([time, z.literal("")])
 const text = (max: number) => z.string().trim().max(max)
